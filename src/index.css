@@ -29,7 +29,7 @@
 
     /* Primary (Indigo 500) */
     --color-primary: #6366f1;
-    --color-primary-container: #18181b; /* Overridden by gradient where applicable */
+    --color-primary-container: #18181b;
     --color-on-primary-container: #ffffff;
     --color-on-primary: #ffffff;
     
@@ -50,7 +50,7 @@
     --color-on-error: #ffffff;
     --color-on-error-container: #fca5a5;
 
-    /* Elegant Dark Fonts */
+    /* Fonts */
     --font-headline: "Helvetica Neue", Arial, sans-serif;
     --font-body: "Helvetica Neue", Arial, sans-serif;
     --font-label: "Helvetica Neue", Arial, sans-serif;
@@ -65,65 +65,44 @@ body {
     background-color: var(--color-background);
     color: var(--color-on-background);
     font-family: var(--font-body);
+    margin: 0;
+    padding: 0;
 }
 
-/* Force border styling for cards per the design standard */
+/* Base Utility Classes without !important */
 .bg-surface-container, 
 .bg-surface-container-low, 
-.bg-surface-container-lowest,
-.bg-surface-container-high,
 .bg-surface-container-highest {
-    background-color: #18181b !important;
-    border: 1px solid #27272a !important;
-    border-radius: 16px !important;
-    box-shadow: none !important;
+    background-color: var(--color-surface-container);
+    border: 1px solid var(--color-outline-variant);
+    border-radius: var(--radius-xl);
 }
 
-/* Ensure hover states retain borders but change bg */
 .hover\:bg-surface-container-high:hover {
-    background-color: #27272a !important;
+    background-color: var(--color-surface-container-high);
 }
 
-/* Match the exact primary gradient wherever accent buttons are used */
+/* Accent Gradients */
 [class*="from-primary"][class*="to-primary"] {
-    background: linear-gradient(135deg, #6366f1, #a855f7) !important;
-    color: white !important;
-    border: none !important;
+    background: linear-gradient(135deg, var(--color-primary), #a855f7);
+    color: white;
 }
 
-/* Specific text color overrides */
-.text-primary {
-    color: #6366f1 !important;
-}
-.text-tertiary {
-    color: #10b981 !important;
-}
-.text-error {
-    color: #ef4444 !important;
-}
+/* Reset Specific Text Colors */
+.text-primary { color: var(--color-primary); }
+.text-tertiary { color: var(--color-tertiary); }
+.text-error { color: var(--color-error); }
 
-/* Clear excessive shadows from original app */
-[class*="shadow-"] {
-    box-shadow: none !important;
-}
-
-/* Remove decorative background blurs */
-.bg-primary\/10,
-.bg-primary-container\/5,
-.bg-secondary-container\/10 {
-    display: none !important;
-}
-
-/* Typography styles matching the stat label aesthetics */
+/* Typography */
 .font-label, .stat-label {
-    font-size: 12px !important;
-    font-weight: 500 !important;
-    color: #a1a1aa !important;
-    text-transform: uppercase !important;
-    letter-spacing: 0.05em !important;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--color-on-surface-variant);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
 }
 
-/* Base icon sizing */
+/* Icon Resets */
 .material-symbols-outlined {
     font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
 }

@@ -1,5 +1,5 @@
 {
-  "name": "FitFlex AI",
+  "name": "FitFlex",
   "description": "Precision tracking, elevated performance fitness application with AI coaching and workout analytics.",
   "requestFramePermissions": [
     "camera"

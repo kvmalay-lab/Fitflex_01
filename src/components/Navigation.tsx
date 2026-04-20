@@ -1,81 +1,113 @@
-export default function Navigation({ currentTab, setTab, children }: { currentTab: string, setTab: (t: string) => void, children: React.ReactNode }) {
-  const userAvatar = "https://lh3.googleusercontent.com/aida-public/AB6AXuB5kq88DqK_TYuZxLdwKrUzeuCXT-oqq_kP_r2088bVvTFxZ3iSFqFtbBv58wVER6Dncw6klMKJKyyeIb6hH6n0lscKNx8LID6vSmBBFOzGfo69z0e9Mm5nfyKKUrdrVUbWkscHe0Gtd-B53qGElvc7Rm4vgccGTLydvniyv1PZL3jcj_oXXCgJ1j_oeBcqH9j3Rxjeq9ktQYyvzECZTDH5WNgnabavq1wEx-8NgRM-vyYFzet4CI6buzHwJ6_MoDVADNvbtm1EuikY";
+import { Link, useLocation } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import clsx from 'clsx';
+import { twMerge } from 'tailwind-merge';
+
+function cn(...inputs: (string | undefined | null | false)[]) {
+  return twMerge(clsx(inputs));
+}
+
+// Clean Dashboard Layout Sidebar
+export default function Navigation({ children, currentTab }: { children: React.ReactNode, currentTab: string }) {
+  const { user } = useAuth();
+  const location = useLocation();
+
+  const navLinks = [
+    { id: 'dashboard', label: 'Dashboard', icon: 'dashboard', path: '/' },
+    { id: 'summary', label: 'Last Recap', icon: 'history', path: '/summary' }
+  ];
+
+  const isActive = (path: string) => {
+     if (path === '/' && location.pathname !== '/') return false;
+     return location.pathname.startsWith(path);
+  };
 
   return (
-    <div className="bg-surface text-on-surface min-h-screen flex flex-col md:flex-row pb-24 md:pb-0 overflow-x-hidden">
-      {/* TopAppBar (Mobile) */}
-      <header className="fixed top-0 w-full z-50 flex justify-between items-center px-6 h-16 bg-[#191c22]/60 backdrop-blur-xl md:hidden transition-all duration-200">
-        <div className="flex items-center gap-4">
-          <img alt="User Profile" className="w-8 h-8 rounded-full object-cover" src={userAvatar} />
-          <span className="text-xl font-black text-[#b6c4ff] font-headline tracking-tight">FitFlex AI</span>
+    <div className="flex h-screen w-full bg-background overflow-hidden text-on-surface font-body">
+      {/* Desktop Sidebar */}
+      <aside className="hidden md:flex w-64 bg-surface-container flex-col p-6 border-r border-outline-variant z-20">
+        <div className="flex items-center gap-3 font-headline font-bold text-xl tracking-tight mb-12 text-on-surface">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-primary-container shadow-lg flex items-center justify-center text-white">
+            <span className="material-symbols-outlined text-[20px]">fitness_center</span>
+          </div>
+          FIT<span className="font-light text-primary tracking-normal ml-0.5">FLEX</span>
         </div>
-        <button className="text-[#b6c4ff] hover:bg-[#272a31] transition-colors p-2 rounded-full active:scale-95 duration-200">
-          <span className="material-symbols-outlined">settings</span>
-        </button>
-      </header>
 
-      {/* NavigationDrawer (Desktop) */}
-      <nav className="hidden md:flex flex-col h-screen fixed left-0 top-0 py-8 w-72 bg-[#10131a] border-r border-[#ffffff]/10 z-40 transition-transform duration-300">
-        <div className="px-6 mb-8">
-          <h1 className="text-2xl font-black text-[#b6c4ff] font-headline tracking-tight">FitFlex AI</h1>
-        </div>
-        <div className="px-6 mb-8 flex items-center gap-4">
-          <img alt="User Avatar" className="w-12 h-12 rounded-full object-cover border-2 border-surface-container" src={userAvatar} />
-          <div>
-            <div className="font-headline font-bold text-on-surface text-base">Alex Sterling</div>
-            <div className="font-body text-xs text-on-surface-variant">Pro Athlete • Level 42</div>
+        <nav className="flex-1 flex flex-col gap-1">
+          {navLinks.map((link) => (
+            <Link 
+              key={link.id} 
+              to={link.path}
+              className={cn(
+                "flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group text-sm",
+                isActive(link.path)
+                  ? "bg-surface-container-highest text-on-surface font-medium"
+                  : "text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface"
+              )}
+            >
+              <span className={cn("material-symbols-outlined transition-colors", isActive(link.path) ? "icon-fill text-primary" : "")}>
+                {link.icon}
+              </span>
+              {link.label}
+            </Link>
+          ))}
+        </nav>
+
+        {/* User Mini Profile */}
+        <div className="mt-auto bg-surface-container-high p-4 rounded-xl flex items-center gap-3 border border-outline-variant">
+          <div className="w-10 h-10 rounded-full bg-surface-container-highest border border-outline-variant overflow-hidden flex items-center justify-center text-on-surface-variant">
+            <span className="material-symbols-outlined text-lg">person</span>
+          </div>
+          <div className="flex-1 overflow-hidden">
+             <div className="font-bold text-sm text-on-surface truncate">{user?.email?.split('@')[0] || 'Athlete'}</div>
+             <div className="text-[10px] text-tertiary uppercase tracking-widest font-bold">Pro Active</div>
           </div>
         </div>
-        <div className="flex-1 px-4 space-y-2">
-          <button onClick={() => setTab('dashboard')} className={`w-full flex items-center gap-3 ${currentTab === 'dashboard' ? 'bg-gradient-to-r from-[#2962ff] to-[#b6c4ff] text-white' : 'text-[#c3c5d8] hover:bg-[#1d2026]'} rounded-r-full py-3 px-6 font-headline text-sm font-medium transition-all group`}>
-            <span className="material-symbols-outlined group-hover:scale-110 transition-transform">{currentTab === 'dashboard' ? 'dashboard' : 'grid_view'}</span>
-            Dashboard
-          </button>
-          <button onClick={() => setTab('training')} className={`w-full flex items-center gap-3 ${currentTab === 'training' ? 'bg-gradient-to-r from-[#2962ff] to-[#b6c4ff] text-white' : 'text-[#c3c5d8] hover:bg-[#1d2026]'} rounded-r-full py-3 px-6 font-headline text-sm font-medium transition-all group`}>
-            <span className="material-symbols-outlined group-hover:scale-110 transition-transform">event_note</span>
-            Training Plans
-          </button>
-          <button onClick={() => setTab('analytics')} className={`w-full flex items-center gap-3 ${currentTab === 'analytics' ? 'bg-gradient-to-r from-[#2962ff] to-[#b6c4ff] text-white' : 'text-[#c3c5d8] hover:bg-[#1d2026]'} rounded-r-full py-3 px-6 font-headline text-sm font-medium transition-all group`}>
-            <span className="material-symbols-outlined group-hover:scale-110 transition-transform">insights</span>
-            Performance
-          </button>
-          <button onClick={() => setTab('community')} className={`w-full flex items-center gap-3 ${currentTab === 'community' ? 'bg-gradient-to-r from-[#2962ff] to-[#b6c4ff] text-white' : 'text-[#c3c5d8] hover:bg-[#1d2026]'} rounded-r-full py-3 px-6 font-headline text-sm font-medium transition-all group`}>
-            <span className="material-symbols-outlined group-hover:scale-110 transition-transform">group</span>
-            Community
-          </button>
-        </div>
-        <div className="px-4 mt-auto">
-          <button onClick={() => setTab('settings')} className={`w-full flex items-center gap-3 ${currentTab === 'settings' ? 'bg-gradient-to-r from-[#2962ff] to-[#b6c4ff] text-white' : 'text-[#c3c5d8] hover:bg-[#1d2026]'} rounded-r-full py-3 px-6 font-headline text-sm font-medium transition-all group`}>
-            <span className="material-symbols-outlined group-hover:scale-110 transition-transform">settings</span>
-            Settings
-          </button>
-        </div>
-      </nav>
+      </aside>
 
-      {/* Main Content */}
-      <main className="flex-1 md:ml-72 pt-20 md:pt-8 px-4 md:px-8 max-w-7xl mx-auto w-full min-h-screen">
-        {children}
+      {/* Main Content Area */}
+      <main className="flex-1 h-screen overflow-y-auto">
+        {/* Mobile Header */}
+        <header className="md:hidden flex items-center justify-between p-4 bg-surface-container border-b border-outline-variant sticky top-0 z-20">
+          <div className="flex items-center gap-2 font-headline font-bold text-lg text-on-surface">
+             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-primary-container flex items-center justify-center text-white">
+               <span className="material-symbols-outlined text-[20px]">fitness_center</span>
+             </div>
+             FITFLEX
+          </div>
+           {/* Display tiny user generic avatar */}
+           <div className="w-8 h-8 rounded-full bg-surface-container-highest flex items-center justify-center">
+             <span className="material-symbols-outlined text-sm">person</span>
+           </div>
+        </header>
+
+        <div className="p-4 md:p-10 pb-24 md:pb-10 max-w-7xl mx-auto">
+          {children}
+        </div>
       </main>
 
-      {/* Bottom NavBar (Mobile) */}
-      <nav className="fixed bottom-0 w-full z-50 flex justify-around items-center px-4 pb-6 pt-3 md:hidden bg-[#191c22]/80 backdrop-blur-lg rounded-t-2xl shadow-[0_-4px_24px_rgba(0,21,80,0.08)]">
-        <button onClick={() => setTab('dashboard')} className={`flex flex-col items-center justify-center rounded-xl px-4 py-1 active:scale-90 transition-transform ${currentTab === 'dashboard' ? 'bg-[#2962ff] text-white' : 'text-[#c3c5d8] hover:text-[#b6c4ff]'}`}>
-          <span className="material-symbols-outlined mb-1 text-[20px]" style={{ fontVariationSettings: currentTab === 'dashboard' ? "'FILL' 1" : undefined }}>fitness_center</span>
-          <span className="font-label text-[10px] uppercase tracking-widest font-semibold mt-1">Workout</span>
-        </button>
-        <button onClick={() => setTab('analytics')} className={`flex flex-col items-center justify-center rounded-xl px-4 py-1 active:scale-90 transition-transform ${currentTab === 'analytics' ? 'bg-[#2962ff] text-white' : 'text-[#c3c5d8] hover:text-[#b6c4ff]'}`}>
-          <span className="material-symbols-outlined mb-1 text-[20px]" style={{ fontVariationSettings: currentTab === 'analytics' ? "'FILL' 1" : undefined }}>leaderboard</span>
-          <span className="font-label text-[10px] uppercase tracking-widest font-semibold mt-1">Analytics</span>
-        </button>
-        <button onClick={() => setTab('coach')} className={`flex flex-col items-center justify-center rounded-xl px-4 py-1 active:scale-90 transition-transform ${currentTab === 'coach' ? 'bg-[#2962ff] text-white' : 'text-[#c3c5d8] hover:text-[#b6c4ff]'}`}>
-          <span className="material-symbols-outlined mb-1 text-[20px]" style={{ fontVariationSettings: currentTab === 'coach' ? "'FILL' 1" : undefined }}>psychology</span>
-          <span className="font-label text-[10px] uppercase tracking-widest font-semibold mt-1">AI Coach</span>
-        </button>
-        <button onClick={() => setTab('profile')} className={`flex flex-col items-center justify-center rounded-xl px-4 py-1 active:scale-90 transition-transform ${currentTab === 'profile' ? 'bg-[#2962ff] text-white' : 'text-[#c3c5d8] hover:text-[#b6c4ff]'}`}>
-          <span className="material-symbols-outlined mb-1 text-[20px]" style={{ fontVariationSettings: currentTab === 'profile' ? "'FILL' 1" : undefined }}>person</span>
-          <span className="font-label text-[10px] uppercase tracking-widest font-semibold mt-1">Profile</span>
-        </button>
-      </nav>
+      {/* Mobile Bottom Navigation Menu */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-surface-container/90 backdrop-blur-xl border-t border-outline-variant pb-safe z-50">
+        <div className="flex items-center justify-around p-2">
+          {navLinks.map((link) => (
+            <Link 
+              key={link.id} 
+              to={link.path}
+              className={cn(
+                "flex flex-col items-center gap-1 p-2 min-w-[64px] transition-colors rounded-xl",
+                isActive(link.path) ? "text-primary" : "text-on-surface-variant"
+              )}
+            >
+              <span className={cn("material-symbols-outlined", isActive(link.path) && "icon-fill")}>
+                {link.icon}
+              </span>
+              <span className={cn("text-[10px] font-label font-bold tracking-wider", isActive(link.path) && "text-on-surface")}>
+                {link.label}
+              </span>
+            </Link>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

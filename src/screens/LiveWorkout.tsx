@@ -1,5 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useWorkoutTracking } from '../hooks/useWorkoutTracking';
+import { useAudioFeedback } from '../hooks/useAudioFeedback';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -7,149 +9,144 @@ function cn(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
 }
 
-export default function LiveWorkout({ exerciseType = 'bicep_curl', onEnd }: { exerciseType?: string, onEnd: () => void }) {
+// BoundingBox Component for Calibration
+function BoundingBoxOverlay({ status }: { status: string }) {
+  const isBad = status === 'LOW_CONFIDENCE' || status === 'INVALID';
+  const color = isBad ? 'border-error' : status === 'WARNING' ? 'border-[#f59e0b]' : 'border-tertiary';
+  return (
+    <div className={cn("absolute inset-[10%] lg:inset-[20%] border-4 border-dashed rounded-3xl pointer-events-none transition-colors duration-300 opacity-50", color)}></div>
+  );
+}
+
+export default function LiveWorkout() {
+  const { exercise } = useParams();
+  const navigate = useNavigate();
+  const { stats, isLoading, frameUrl } = useWorkoutTracking(exercise || 'bicep_curl');
+  const { playBeep, playBuzz, initAudio } = useAudioFeedback();
+  
   const [isPaused, setIsPaused] = useState(false);
-  const [toast, setToast] = useState<{message: string, type: 'VALID'|'WARNING'|'INVALID'|'LOW_CONFIDENCE'} | null>(null);
-  const { stats, isLoading, error, frameUrl } = useWorkoutTracking(exerciseType);
+  const [eyesFree, setEyesFree] = useState(false);
+  const [showSkeleton, setShowSkeleton] = useState(true); // Toggle logic for UI trust
+
+  // Monitor Reps & Form to Trigger Audio
+  const previousReps = useRef(stats.rep_count);
+  const previousStatus = useRef(stats.form_status);
 
   useEffect(() => {
-    if (stats.form_status !== 'VALID' && stats.form_status !== 'LOW_CONFIDENCE') {
-      setToast({ message: stats.feedback, type: stats.form_status });
-      const timer = setTimeout(() => setToast(null), 2500);
-      return () => clearTimeout(timer);
+    // Rep increment detection
+    if (stats.rep_count > previousReps.current) {
+      if (eyesFree || !isPaused) playBeep();
+      previousReps.current = stats.rep_count;
     }
-  }, [stats.feedback, stats.form_status]);
+    
+    // Form degradation detection
+    if ((stats.form_status === 'WARNING' || stats.form_status === 'INVALID') && previousStatus.current === 'VALID') {
+       if (eyesFree || !isPaused) playBuzz();
+    }
+    previousStatus.current = stats.form_status;
+  }, [stats.rep_count, stats.form_status, playBeep, playBuzz, eyesFree, isPaused]);
 
-  const formattedTime = "Live • " + (exerciseType.replace('_', ' ').toUpperCase());
+  // Audio interaction requires a user click, trigger on load or on interaction
+  useEffect(() => { initAudio(); }, [initAudio]);
 
-  // Angle calculated into SVG Dasharray (max 180deg)
-  const circumference = 2 * Math.PI * 45; // r=45
-  const strokeDashoffset = circumference - (stats.current_angle / 180) * circumference;
+  const handleEnd = () => {
+    // Persistence
+    localStorage.setItem('fitflex_last_session', JSON.stringify({
+      exercise,
+      reps: stats.rep_count,
+      status: stats.form_status,
+      date: new Date().toISOString()
+    }));
+    // Cumulative metrics
+    const totals = parseInt(localStorage.getItem('fitflex_last_reps') || '0', 10);
+    localStorage.setItem('fitflex_last_reps', (totals + stats.rep_count).toString());
+    
+    navigate('/summary');
+  };
+
+  // Border color based on status
+  const containerBorderColor =
+    stats.form_status === 'INVALID' || stats.form_status === 'LOW_CONFIDENCE'
+      ? 'border-error'
+      : stats.form_status === 'WARNING'
+      ? 'border-[#f59e0b]'
+      : 'border-tertiary';
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
-      <header className="px-6 py-4 flex items-center justify-between border-b border-outline-variant bg-surface-container-low shrink-0 z-20">
-        <div className="flex items-center gap-4">
-          <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-primary border border-primary/30">
-            <span className="material-symbols-outlined icon-fill">videocam</span>
+    <div className="min-h-screen bg-background flex flex-col items-center justify-center overflow-hidden">
+      {/* Immersive Workout View (V2) */}
+      <div 
+        className={cn(
+           "relative w-full h-full max-w-7xl mx-auto flex flex-col lg:flex-row transition-all duration-500",
+           // Only add thick borders when tracking is active and not paused
+           !isLoading && !isPaused ? `border-8 ${containerBorderColor} rounded-3xl m-2 lg:m-4` : 'border-0'
+        )}
+      >
+        
+        {/* Header Overlay Controls */}
+        <div className="absolute top-0 left-0 right-0 p-4 lg:p-8 flex justify-between items-start z-50 pointer-events-none">
+          <div className="bg-surface-container/60 backdrop-blur-md px-4 py-2 rounded-full border border-outline pointer-events-auto flex gap-4">
+             <button onClick={() => setEyesFree(!eyesFree)} className={cn("text-on-surface px-2 rounded-full font-bold text-xs uppercase tracking-widest", eyesFree ? "text-primary" : "opacity-50")}>
+               <span className="material-symbols-outlined align-middle mr-1 text-sm">{eyesFree ? 'volume_up' : 'volume_off'}</span> Eyes-Free
+             </button>
+             <button onClick={() => setShowSkeleton(!showSkeleton)} className={cn("text-on-surface px-2 rounded-full font-bold text-xs uppercase tracking-widest", showSkeleton ? "text-tertiary" : "opacity-50")}>
+               <span className="material-symbols-outlined align-middle mr-1 text-sm">{showSkeleton ? 'visibility' : 'visibility_off'}</span> Skeleton
+             </button>
           </div>
-          <div>
-            <h2 className="font-headline font-bold text-on-surface">Tracking Session</h2>
-            <p className="text-secondary text-xs uppercase tracking-wider font-label animate-pulse">{formattedTime}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <button 
-            onClick={() => setIsPaused(!isPaused)}
-            className="w-12 h-12 rounded-full bg-surface-container-high border border-outline-variant flex items-center justify-center text-on-surface hover:bg-surface-variant transition-colors"
-          >
-            <span className="material-symbols-outlined icon-fill">{isPaused ? 'play_arrow' : 'pause'}</span>
-          </button>
-          <button 
-            onClick={onEnd}
-            className="px-6 py-3 rounded-full bg-error text-white font-headline font-bold hover:bg-error-container transition-colors tracking-wide"
-          >
-            END
+          
+          <button onClick={handleEnd} className="bg-error hover:bg-error-container text-white px-6 py-3 rounded-full font-bold tracking-widest uppercase pointer-events-auto shadow-2xl transition-colors">
+            Exit
           </button>
         </div>
-      </header>
 
-      <main className="flex-1 p-6 grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch relative">
-        <div className="relative w-full h-full min-h-[500px] border border-outline-variant bg-surface-container rounded-xl overflow-hidden flex flex-col">
-           {isLoading ? (
-             <div className="flex-1 flex flex-col items-center justify-center text-on-surface-variant bg-surface-container-low shadow-none">
-               <span className="material-symbols-outlined text-4xl animate-spin mb-4">progress_activity</span>
-               <p className="font-body tracking-wider text-sm">Connecting to Tracking Service...</p>
+        {/* Camera Feed Background (Fills entire container) */}
+        <div className="absolute inset-0 bg-surface z-0 overflow-hidden rounded-2xl">
+          {isLoading ? (
+             <div className="w-full h-full flex flex-col items-center justify-center text-on-surface-variant">
+               <span className="material-symbols-outlined text-5xl animate-spin mb-4">progress_activity</span>
+               <p className="font-headline text-lg tracking-widest uppercase">Connecting Tracker</p>
              </div>
-           ) : (
-             <div className="relative flex-1 bg-black overflow-hidden shadow-none border-none">
-                <img 
+          ) : (
+             <>
+               <img 
                   src={frameUrl} 
                   alt="Live Camera Feed Stream" 
-                  className="w-full h-full object-cover shadow-none border-none"
-                />
-
-                {toast && (
-                  <div className={cn(
-                    "absolute top-6 left-1/2 -translate-x-1/2 px-6 py-3 rounded-full border shadow-2xl backdrop-blur-md z-50 flex items-center gap-3 transition-all duration-300 animate-in slide-in-from-top-4",
-                    toast.type === 'INVALID' ? "bg-error/90 border-error text-white" : "bg-[#f59e0b]/90 border-[#f59e0b] text-white"
-                  )}>
-                     <span className="material-symbols-outlined icon-fill text-lg">warning</span>
-                     <span className="font-body font-bold text-sm tracking-wide">{toast.message}</span>
-                  </div>
-                )}
-
-                <div className="absolute bottom-6 right-6 p-5 rounded-2xl bg-surface-container-low/80 backdrop-blur-xl border border-outline-variant shadow-2xl min-w-[200px]">
-                  <div className="flex items-center justify-between mb-4">
-                    <span className="text-xs font-label uppercase tracking-widest text-on-surface-variant">Live Form</span>
-                    <span className={cn(
-                      "px-2 py-1 rounded text-[10px] font-bold tracking-widest uppercase",
-                      stats.form_status === 'VALID' ? "bg-tertiary/20 text-tertiary" : 
-                      stats.form_status === 'WARNING' ? "bg-[#f59e0b]/20 text-[#f59e0b]" : 
-                      "bg-error/20 text-error"
-                    )}>
-                      {stats.form_status}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-6">
-                    <div>
-                      <div className="text-[10px] uppercase font-label tracking-widest text-on-surface-variant mb-1">Reps</div>
-                      <div className="text-5xl font-headline font-black text-on-surface tabular-nums leading-none">{stats.rep_count}</div>
-                    </div>
-                    
-                    <div className="relative w-16 h-16 flex items-center justify-center">
-                      <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
-                        <circle cx="50" cy="50" r="45" fill="none" stroke="currentColor" strokeWidth="8" className="text-surface-container-highest" />
-                        <circle 
-                          cx="50" cy="50" r="45" 
-                          fill="none" 
-                          stroke="currentColor" 
-                          strokeWidth="8" 
-                          strokeLinecap="round"
-                          strokeDasharray={circumference}
-                          strokeDashoffset={strokeDashoffset}
-                          className="text-primary transition-all duration-[33ms] ease-linear" 
-                        />
-                      </svg>
-                      <div className="absolute inset-0 flex flex-col items-center justify-center">
-                        <span className="text-[10px] font-label text-on-surface-variant">deg</span>
-                        <span className="text-sm font-headline font-bold text-on-surface leading-tight tabular-nums">{Math.round(stats.current_angle)}&deg;</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-             </div>
-           )}
+                  className={cn("w-full h-full object-cover", !showSkeleton && "contrast-[1.1] grayscale-[0.2]")}
+               />
+               <BoundingBoxOverlay status={stats.form_status} />
+             </>
+          )}
         </div>
 
-        <div className="flex flex-col gap-6">
-           <div className="bg-surface-container rounded-xl p-6 border border-outline-variant flex items-center gap-6">
-             <div className="w-16 h-16 rounded-full bg-error/10 flex items-center justify-center text-error relative">
-               <span className="material-symbols-outlined icon-fill text-2xl animate-pulse">favorite</span>
-             </div>
-             <div>
-               <div className="text-xs font-label uppercase text-on-surface-variant tracking-widest mb-1">Heart Rate</div>
-               <div className="text-4xl font-headline font-bold text-on-surface">142 <span className="text-sm text-secondary font-body">bpm</span></div>
-             </div>
-           </div>
-
-           <div className="flex-1 bg-surface-container rounded-xl border border-outline-variant p-6 flex flex-col">
-              <h3 className="font-label text-xs uppercase tracking-widest text-on-surface-variant mb-6">Current Set Sequence</h3>
-              <div className="flex-1 space-y-4">
-                 {[...Array(Math.min(5, Math.max(1, stats.rep_count)))].map((_, i) => (
-                    <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-surface-container-highest">
-                       <span className="font-body text-sm text-on-surface font-semibold">Rep {i + 1}</span>
-                       <div className="flex items-center gap-2 text-xs">
-                          <span className="text-secondary font-medium">Recorded</span>
-                          <span className="material-symbols-outlined text-secondary text-sm">check_circle</span>
-                       </div>
-                    </div>
-                 )).reverse()}
+        {/* Massive Centered Stats Overlay */}
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center pointer-events-none drop-shadow-2xl">
+          {!isLoading && (
+            <>
+              <div 
+                 className={cn(
+                   "text-[12rem] lg:text-[18rem] leading-none font-black font-headline tabular-nums tracking-tighter drop-shadow-2xl transition-colors duration-200", 
+                   stats.form_status === 'VALID' ? "text-white" : stats.form_status === 'WARNING' ? "text-[#f59e0b]" : "text-error"
+                 )}
+              >
+                {stats.rep_count}
               </div>
-           </div>
+              
+              <div className={cn(
+                "px-8 py-3 rounded-full backdrop-blur-xl border-2 font-headline font-bold text-2xl uppercase tracking-widest mt-4 transition-all duration-300",
+                stats.form_status === 'VALID' ? "bg-tertiary/20 text-tertiary border-tertiary" : 
+                stats.form_status === 'WARNING' ? "bg-[#f59e0b]/20 text-[#f59e0b] border-[#f59e0b]" : 
+                stats.form_status === 'LOW_CONFIDENCE' ? "bg-on-surface/20 text-on-surface border-on-surface" :
+                "bg-error/20 text-error border-error animate-pulse"
+              )}>
+                {stats.form_status === 'VALID' ? 'Good Form' : 
+                 stats.form_status === 'LOW_CONFIDENCE' ? 'Step Back' : 
+                 stats.feedback || 'Fix Posture'}
+              </div>
+            </>
+          )}
         </div>
-      </main>
+
+      </div>
     </div>
   );
 }

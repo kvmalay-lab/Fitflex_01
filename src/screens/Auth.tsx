@@ -36,7 +36,7 @@ export default function AuthScreen() {
         <div className="relative z-10">
           <div className="text-center mb-8">
             <h1 className="text-3xl font-headline font-extrabold text-on-surface tracking-tight">
-              {isLogin ? 'Welcome Back' : 'Join FitFlex Arena'}
+              {isLogin ? 'Welcome Back' : 'Join FitFlex'}
             </h1>
             <p className="text-on-surface-variant font-body text-sm mt-2">
               {isLogin ? 'Sign in to sync your AI workout data.' : 'Create an account to start tracking.'}
