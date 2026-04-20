@@ -1,0 +1,2901 @@
+Here's your clean, copy-paste ready **Replit Master Prompt:**
+
+
+
+---
+
+
+
+```text
+
+You are an expert full-stack developer. Build me a complete, 
+
+production-ready application called FitFlex.
+
+
+
+=============================================================
+
+PROJECT OVERVIEW
+
+=============================================================
+
+FitFlex is a hybrid AI gym coaching platform that:
+
+1. Uses a fixed gym camera to track user exercise form
+
+2. Processes pose data locally on a gym server (no cloud)
+
+3. Sends real-time workout data to the user's phone via WebSocket
+
+4. Displays live rep counts, form scores, and coaching tips on
+
+   a mobile-friendly web app (PWA)
+
+
+
+=============================================================
+
+SYSTEM ARCHITECTURE
+
+=============================================================
+
+[Gym Camera] 
+
+    → [Python FastAPI Backend (gym server)]
+
+        → [WebSocket]
+
+            → [React PWA (user's phone)]
+
+
+
+- No cloud. Everything runs on local gym WiFi.
+
+- No raw video stored. Only pose landmarks processed.
+
+- WebSocket updates every 100ms (10 Hz).
+
+- Auto-detects exercise type from motion patterns.
+
+
+
+=============================================================
+
+TECH STACK
+
+=============================================================
+
+Backend:
+
+- Python 3.11+
+
+- FastAPI + WebSockets
+
+- MediaPipe (pose detection, 33 landmarks)
+
+- OpenCV (camera feed)
+
+- One-Euro Filter (angle smoothing)
+
+- SQLite (session storage via SQLAlchemy)
+
+- Uvicorn (ASGI server)
+
+
+
+Frontend:
+
+- React 18 + TypeScript
+
+- Vite (build tool)
+
+- Redux Toolkit (state management)
+
+- TailwindCSS (styling)
+
+- WebSocket client (native browser API)
+
+- PWA enabled (manifest + service worker)
+
+
+
+=============================================================
+
+COMPLETE FILE STRUCTURE
+
+=============================================================
+
+
+
+fitflex-backend/
+
+├── main.py
+
+├── config.py
+
+├── requirements.txt
+
+├── pose_detector.py
+
+├── one_euro_filter.py
+
+├── angle_calculator.py
+
+├── exercise_classifier.py
+
+├── form_validator.py
+
+├── session_manager.py
+
+├── websocket_server.py
+
+├── database.py
+
+├── exercises/
+
+│   ├── __init__.py
+
+│   ├── base.py
+
+│   ├── bicep_curl.py
+
+│   ├── lat_pulldown.py
+
+│   ├── squat.py
+
+│   ├── shoulder_press.py
+
+│   ├── deadlift.py
+
+│   └── plank.py
+
+└── data/
+
+    └── sessions.db
+
+
+
+fitflex-frontend/
+
+├── index.html
+
+├── vite.config.ts
+
+├── tailwind.config.ts
+
+├── tsconfig.json
+
+├── package.json
+
+├── public/
+
+│   ├── manifest.json
+
+│   └── sw.js
+
+└── src/
+
+    ├── App.tsx
+
+    ├── main.tsx
+
+    ├── index.css
+
+    ├── screens/
+
+    │   ├── Login.tsx
+
+    │   ├── LiveDashboard.tsx
+
+    │   ├── RepBreakdown.tsx
+
+    │   ├── SessionSummary.tsx
+
+    │   └── Progress.tsx
+
+    ├── components/
+
+    │   ├── FormGauge.tsx
+
+    │   ├── RepCounter.tsx
+
+    │   ├── ErrorAlert.tsx
+
+    │   ├── ExerciseLabel.tsx
+
+    │   └── NavBar.tsx
+
+    ├── hooks/
+
+    │   └── useWebSocket.ts
+
+    ├── store/
+
+    │   ├── index.ts
+
+    │   └── workoutSlice.ts
+
+    └── types/
+
+        └── workout.ts
+
+
+
+=============================================================
+
+BACKEND — DETAILED REQUIREMENTS
+
+=============================================================
+
+
+
+--- config.py ---
+
+All constants in one place:
+
+- CAMERA_ID = 0
+
+- CAMERA_FPS = 30
+
+- CAMERA_WIDTH = 1280
+
+- CAMERA_HEIGHT = 720
+
+- MEDIAPIPE_MIN_DETECTION_CONFIDENCE = 0.5
+
+- MEDIAPIPE_MIN_TRACKING_CONFIDENCE = 0.5
+
+- MEDIAPIPE_MODEL_COMPLEXITY = 1
+
+- ONE_EURO_FREQ = 30
+
+- ONE_EURO_MINCUTOFF = 1.0
+
+- ONE_EURO_BETA = 0.0
+
+- ONE_EURO_DCUTOFF = 1.0
+
+- WEBSOCKET_HOST = "0.0.0.0"
+
+- WEBSOCKET_PORT = 8000
+
+- WEBSOCKET_UPDATE_INTERVAL_MS = 100
+
+- SESSION_PRESENCE_TIMEOUT_SECONDS = 30
+
+- DATABASE_PATH = "data/sessions.db"
+
+- FORM_SCORE_BASE = 100
+
+
+
+Exercise thresholds for all 6 exercises:
+
+  BICEP_CURL, LAT_PULLDOWN, SQUAT, 
+
+  SHOULDER_PRESS, DEADLIFT, PLANK
+
+Each with:
+
+  - angle thresholds (top/bottom/incomplete)
+
+  - errors dict with threshold, penalty, message
+
+
+
+--- one_euro_filter.py ---
+
+Full One-Euro Filter implementation:
+
+- __init__(freq, mincutoff, beta, dcutoff)
+
+- filter(value) → smoothed value
+
+- reset()
+
+- Internal low_pass_filter + alpha calculation
+
+
+
+--- angle_calculator.py ---
+
+- calculate_angle_3d(p1, p2, p3) using dot product
+
+  Returns angle in degrees (0-180)
+
+- calculate_angle_2d(p1, p2, p3) using atan2
+
+  Returns angle in degrees (0-360)
+
+- calculate_distance(p1, p2) Euclidean 2D
+
+- calculate_distance_3d(p1, p2) Euclidean 3D
+
+- normalize_landmark(landmark, w, h)
+
+- get_landmark_position(landmarks, index, w, h)
+
+
+
+--- pose_detector.py ---
+
+PoseDetector class:
+
+- __init__ with MediaPipe Pose config
+
+- detect(frame) → (landmarks, annotated_frame)
+
+  Converts BGR→RGB, runs MediaPipe, draws skeleton
+
+  Returns None landmarks if no person detected
+
+- close()
+
+
+
+--- exercises/base.py ---
+
+Abstract Exercise base class:
+
+- ExerciseState enum: READY, ACTIVE, BOTTOM, TOP, HOLD
+
+- Exercise ABC with:
+
+  - __init__(name, config)
+
+  - abstract process_frame(landmarks, w, h) → Dict
+
+  - abstract detect_exercise(landmarks) → bool
+
+  - reset()
+
+  - get_summary() → Dict with total_reps, avg_form_score, reps
+
+
+
+--- exercises/bicep_curl.py ---
+
+BicepCurl(Exercise):
+
+FSM: READY (elbow > 160°) → CURLING (elbow < 90°) → READY
+
+- One-Euro filters for left + right elbow angles
+
+- Hysteresis: top=170°, bottom=85°
+
+- Track both arms, use average angle
+
+- Error detection:
+
+  * lean_back: shoulder angle > 120° → -5pts
+
+  * elbow_flare: lateral movement > 15cm → -3pts
+
+  * incomplete_range: bottom angle > 120° → -2pts
+
+  * swinging: torso rotation > 10° → -4pts
+
+- Per-rep data: rep_number, peak_angle, form_score, errors
+
+
+
+--- exercises/lat_pulldown.py ---
+
+LatPulldown(Exercise):
+
+FSM: READY (elbow > 140°) → PULLING (elbow < 100°) → READY
+
+- One-Euro filters for elbow angles
+
+- Hysteresis: top=145°, bottom=95°
+
+- Error detection:
+
+  * elbows_too_high: elbow angle > 110° at bottom → -5pts
+
+  * forward_lean: torso angle > 20° → -4pts
+
+  * incomplete_pull: elbow angle < 80° → -3pts
+
+  * wide_elbows: elbow spread > 45cm → -3pts
+
+
+
+--- exercises/squat.py ---
+
+Squat(Exercise):
+
+FSM: READY (knee > 170°) → SQUATTING (knee < 90°) → READY
+
+- One-Euro filters for knee angles
+
+- Hysteresis: top=165°, bottom=95°
+
+- Error detection:
+
+  * knees_cave: knee inward > 15cm → -5pts
+
+  * incomplete_depth: bottom angle > 110° → -4pts
+
+  * forward_lean: torso angle > 25° → -4pts
+
+  * forward_knee: knee past ankle > 15cm → -3pts
+
+
+
+--- exercises/shoulder_press.py ---
+
+ShoulderPress(Exercise):
+
+FSM: READY (elbow < 90°) → PRESSING (elbow > 160°) → READY
+
+- One-Euro filters for elbow angles
+
+- Hysteresis: top=155°, bottom=95°
+
+- Error detection:
+
+  * incomplete_lockout: top angle < 150° → -4pts
+
+  * elbow_flare: elbows not under wrists → -3pts
+
+  * torso_lean: lean > 15° → -3pts
+
+  * asymmetrical: arm difference > 10° → -2pts
+
+
+
+--- exercises/deadlift.py ---
+
+Deadlift(Exercise):
+
+FSM: READY (knee > 170°) → HINGING (knee < 80°) → READY
+
+- One-Euro filters for knee + back angles
+
+- Hysteresis: top=165°, bottom=85°
+
+- Error detection:
+
+  * back_rounding: back angle > 55° → -5pts
+
+  * incomplete_lockout: hip not extended → -4pts
+
+  * knee_drift: lateral movement > 10cm → -3pts
+
+  * bar_drift: bar path > 15cm from body → -2pts
+
+
+
+--- exercises/plank.py ---
+
+Plank(Exercise):
+
+NOT rep-based — time-based hold detection
+
+- Detect hold start when body is in plank position
+
+- Track hold duration in seconds
+
+- Error detection:
+
+  * hip_sag: hip drop > 20cm → -5pts
+
+  * shoulder_rotation: rotation > 10° → -3pts
+
+  * head_drop: head drop > 15cm → -3pts
+
+- Report hold_duration instead of rep_count
+
+
+
+--- exercise_classifier.py ---
+
+ExerciseClassifier class:
+
+- __init__() with motion history buffer (10 frames)
+
+- classify(landmarks) → exercise_name or None
+
+- Uses motion patterns per exercise:
+
+  * Bicep Curl: large elbow angle change, arms below shoulders
+
+  * Lat Pulldown: elbow angle change + shoulder height drop
+
+  * Squat: large knee angle change, person standing
+
+  * Shoulder Press: elbow angle change, arms above shoulders
+
+  * Deadlift: knee + hip angle change, torso hinge
+
+  * Plank: horizontal body position, static
+
+- Returns None until 10 frames analyzed
+
+- Returns most likely exercise name
+
+
+
+--- session_manager.py ---
+
+SessionManager class:
+
+- __init__()
+
+- update(landmarks, w, h) → session_data Dict
+
+- Session lifecycle:
+
+  * IDLE: No person detected
+
+  * ACTIVE: Person present, tracking
+
+  * ENDING: Person absent for < 30s
+
+  * ENDED: Person absent for > 30s → save session
+
+- Auto-detects exercise, switches exercise if pattern changes
+
+- Tracks: start_time, end_time, exercise, reps, form_scores
+
+- save_session(db) → saves to SQLite
+
+- get_live_data() → current frame data for WebSocket
+
+
+
+WebSocket payload (every 100ms):
+
+{
+
+  "timestamp": int,
+
+  "session_id": str,
+
+  "user_id": str,
+
+  "exercise": str,
+
+  "rep_count": int,
+
+  "current_rep_stage": str,
+
+  "angles": {
+
+    "left_elbow": float,
+
+    "right_elbow": float,
+
+    ...exercise-specific angles...
+
+  },
+
+  "form_errors": [
+
+    {
+
+      "type": str,
+
+      "confidence": float,
+
+      "penalty": int,
+
+      "message": str
+
+    }
+
+  ],
+
+  "form_score": int,
+
+  "rep_history": [
+
+    {
+
+      "rep_number": int,
+
+      "peak_angle": float,
+
+      "form_score": int,
+
+      "errors": []
+
+    }
+
+  ],
+
+  "session_status": str
+
+}
+
+
+
+Session summary payload (on session end):
+
+{
+
+  "session_id": str,
+
+  "user_id": str,
+
+  "exercise": str,
+
+  "total_reps": int,
+
+  "avg_form_score": float,
+
+  "best_rep": { rep object },
+
+  "worst_rep": { rep object },
+
+  "top_errors": [str, str, str],
+
+  "duration_seconds": int,
+
+  "timestamp": int
+
+}
+
+
+
+--- database.py ---
+
+SQLAlchemy + SQLite:
+
+Tables:
+
+  users(id, pin, name, gym_id, created_at)
+
+  sessions(id, user_id, exercise, total_reps,
+
+           avg_form_score, duration, data_json,
+
+           created_at)
+
+Functions:
+
+- init_db()
+
+- save_session(session_data)
+
+- get_user_sessions(user_id, limit=20)
+
+- get_user_by_pin(pin)
+
+- create_user(pin, name, gym_id)
+
+
+
+--- websocket_server.py ---
+
+FastAPI app with:
+
+- GET /health → {"status": "ok"}
+
+- POST /auth/login → {pin} → {user_id, token, name}
+
+- GET /sessions/{user_id} → list of past sessions
+
+- WebSocket /ws/{user_id} → real-time stream
+
+  * On connect: authenticate token
+
+  * Loop: get live data from session_manager
+
+           send JSON payload every 100ms
+
+  * On disconnect: clean up
+
+- CORS enabled for frontend origin
+
+- Connection manager for multiple clients
+
+
+
+--- main.py ---
+
+Entry point:
+
+- Initialize camera (OpenCV VideoCapture)
+
+- Initialize PoseDetector
+
+- Initialize SessionManager
+
+- Initialize database
+
+- Start FastAPI server (uvicorn)
+
+- Camera loop in background thread:
+
+  * Read frame
+
+  * Detect pose
+
+  * Update session_manager
+
+  * Store latest data for WebSocket clients
+
+- Graceful shutdown on Ctrl+C
+
+
+
+--- requirements.txt ---
+
+fastapi
+
+uvicorn[standard]
+
+mediapipe
+
+opencv-python
+
+numpy
+
+sqlalchemy
+
+python-jose[cryptography]
+
+python-multipart
+
+websockets
+
+
+
+=============================================================
+
+FRONTEND — DETAILED REQUIREMENTS
+
+=============================================================
+
+
+
+--- types/workout.ts ---
+
+TypeScript interfaces:
+
+- WorkoutPayload (matches backend WebSocket JSON exactly)
+
+- RepData
+
+- FormError
+
+- SessionSummary
+
+- User
+
+
+
+--- store/workoutSlice.ts ---
+
+Redux slice with state:
+
+- currentExercise: string
+
+- repCount: number
+
+- formScore: number
+
+- errors: FormError[]
+
+- repHistory: RepData[]
+
+- sessionStatus: string
+
+- angles: Record<string, number>
+
+- isConnected: boolean
+
+- sessionSummary: SessionSummary | null
+
+
+
+Actions:
+
+- updateWorkout(payload)
+
+- setConnected(bool)
+
+- setSessionSummary(summary)
+
+- resetSession()
+
+
+
+--- hooks/useWebSocket.ts ---
+
+Custom React hook:
+
+- useWebSocket(userId: string)
+
+- Connects to ws://[server-ip]:8000/ws/{userId}
+
+- Auto-reconnects on disconnect (3 retries, 2s delay)
+
+- Dispatches updateWorkout on every message
+
+- Returns: { isConnected, error }
+
+
+
+--- screens/Login.tsx ---
+
+- Large FitFlex logo/title
+
+- PIN input (6 digits, numeric keypad)
+
+- "Enter Gym" button
+
+- Calls POST /auth/login
+
+- On success: saves user_id + token to localStorage
+
+- Navigates to LiveDashboard
+
+- Clean, dark gym-themed design
+
+
+
+--- screens/LiveDashboard.tsx ---
+
+Main screen during workout:
+
+- Top bar: exercise name + session status indicator
+
+- CENTER: Large animated rep counter (huge number)
+
+- Form score gauge (circular, 0-100, color coded:
+
+    0-50 = red, 51-75 = yellow, 76-100 = green)
+
+- Error cards (red alerts, scrollable)
+
+  Each card: error type + coaching message
+
+- Rep history mini-list (last 5 reps with scores)
+
+- Bottom: "End Session" button
+
+- Updates in real-time from WebSocket
+
+
+
+--- screens/RepBreakdown.tsx ---
+
+Per-rep analysis:
+
+- List of all reps in current session
+
+- Each rep card shows:
+
+  * Rep number
+
+  * Peak angle
+
+  * Form score (color coded)
+
+  * Errors detected
+
+- Sort by: rep number (ascending, newest last)
+
+- Expandable rep cards to see full error details
+
+- Visual bar chart of form scores across reps
+
+- "Back to Dashboard" button
+
+
+
+--- screens/SessionSummary.tsx ---
+
+Post-workout summary (shown when session ends):
+
+- Exercise name + total duration
+
+- Total reps completed
+
+- Average form score (large gauge)
+
+- Best rep (highest form score) + worst rep (lowest)
+
+- Top 3 most common errors with frequency
+
+- Rep breakdown chart (form score vs rep number)
+
+- Suggestions for next time based on errors
+
+- "Save Session" button (auto-saves to DB)
+
+- "New Workout" button (resets, goes back to Dashboard)
+
+- "View History" button (goes to Progress screen)
+
+
+
+--- screens/Progress.tsx ---
+
+Historical tracking:
+
+- List of past sessions (paginated, 10 per page)
+
+- Each session card:
+
+  * Exercise name
+
+  * Date + time
+
+  * Total reps
+
+  * Average form score
+
+  * Click to expand = see full summary
+
+- Filters: exercise type, date range
+
+- Charts:
+
+  * Form score trend over time (line chart)
+
+  * Rep count trend over time (bar chart)
+
+  * Most common errors across all sessions (pie chart)
+
+- "Export Data" button (download as JSON)
+
+- "Back to Dashboard" button
+
+
+
+--- components/FormGauge.tsx ---
+
+Circular gauge component:
+
+- Props: score (0-100), size (small/medium/large)
+
+- Color coding:
+
+  * 0-50: Red (#ef4444)
+
+  * 51-75: Yellow (#eab308)
+
+  * 76-100: Green (#22c55e)
+
+- Animated needle that sweeps to current score
+
+- Center text: score number + "FORM"
+
+- Smooth transitions on score change
+
+
+
+--- components/RepCounter.tsx ---
+
+Large animated rep display:
+
+- Props: count (number), stage (string)
+
+- Display huge number (font-size: 120px)
+
+- Subtitle: current stage (READY, CURLING, etc.)
+
+- Pulse animation on rep increment
+
+- Background color changes with form score
+
+- Haptic feedback simulation (visual pulse on mobile)
+
+
+
+--- components/ErrorAlert.tsx ---
+
+Red error card component:
+
+- Props: error (FormError object)
+
+- Layout:
+
+  * Left: error icon (exclamation triangle)
+
+  * Center: error type + message
+
+  * Right: penalty points (-5pts)
+
+- Slide-in animation on new error
+
+- Auto-dismiss after 5 seconds (optional)
+
+- Different colors for different error types
+
+
+
+--- components/ExerciseLabel.tsx ---
+
+Exercise name display:
+
+- Props: exercise (string), status (string)
+
+- Large bold text with exercise name
+
+- Status badge (ACTIVE, PAUSED, ENDED)
+
+- Animated background gradient
+
+
+
+--- components/NavBar.tsx ---
+
+Top navigation bar:
+
+- Left: FitFlex logo
+
+- Center: current page title
+
+- Right: user name + logout button
+
+- Sticky, always visible
+
+- Dark background, light text
+
+
+
+--- App.tsx ---
+
+Main app router:
+
+- useState for currentUser, isLoggedIn
+
+- useWebSocket hook (only if logged in)
+
+- React Router with routes:
+
+  * /login → Login screen
+
+  * /dashboard → LiveDashboard (protected)
+
+  * /rep-breakdown → RepBreakdown (protected)
+
+  * /summary → SessionSummary (protected)
+
+  * /progress → Progress screen (protected)
+
+- Auth guard: redirect to /login if not authenticated
+
+- Load user from localStorage on app start
+
+
+
+--- main.tsx ---
+
+React entry point:
+
+- ReactDOM.createRoot(document.getElementById('root'))
+
+- <App /> with Redux Provider wrapper
+
+- Error boundary for crash handling
+
+
+
+--- index.css ---
+
+Global styles:
+
+- Tailwind directives (@tailwind base, components, utilities)
+
+- Custom dark gym theme
+
+- Font: Inter or Roboto
+
+- Color palette:
+
+  * Primary: #10b981 (emerald green)
+
+  * Secondary: #1f2937 (dark gray)
+
+  * Accent: #ef4444 (red for errors)
+
+  * Background: #0f172a (very dark blue)
+
+
+
+--- public/manifest.json ---
+
+PWA manifest:
+
+- name: "FitFlex"
+
+- short_name: "FitFlex"
+
+- start_url: "/"
+
+- display: "standalone"
+
+- theme_color: "#10b981"
+
+- background_color: "#0f172a"
+
+- icons: [192x192, 512x512 PNG]
+
+- scope: "/"
+
+
+
+--- public/sw.js ---
+
+Service worker for PWA:
+
+- Cache static assets (HTML, CSS, JS)
+
+- Network-first strategy for WebSocket (never cache)
+
+- Offline fallback page
+
+- Cache busting on version change
+
+
+
+--- vite.config.ts ---
+
+Vite config:
+
+- React plugin
+
+- TailwindCSS PostCSS
+
+- Port: 5173
+
+- Build output: dist/
+
+- Source maps enabled
+
+
+
+--- tailwind.config.ts ---
+
+Tailwind config:
+
+- Dark mode enabled (class strategy)
+
+- Custom colors (emerald, dark gray, red)
+
+- Custom fonts (Inter)
+
+- Extend theme with custom utilities
+
+
+
+--- tsconfig.json ---
+
+TypeScript config:
+
+- target: ES2020
+
+- lib: [ES2020, DOM, DOM.Iterable]
+
+- jsx: react-jsx
+
+- strict: true
+
+- moduleResolution: bundler
+
+- resolveJsonModule: true
+
+- paths: { "@/*": ["src/*"] }
+
+
+
+--- package.json ---
+
+Frontend dependencies:
+
+{
+
+  "name": "fitflex-frontend",
+
+  "version": "1.0.0",
+
+  "type": "module",
+
+  "scripts": {
+
+    "dev": "vite",
+
+    "build": "tsc && vite build",
+
+    "preview": "vite preview",
+
+    "lint": "eslint src --ext ts,tsx",
+
+    "format": "prettier --write src"
+
+  },
+
+  "dependencies": {
+
+    "react": "^18.2.0",
+
+    "react-dom": "^18.2.0",
+
+    "react-router-dom": "^6.20.0",
+
+    "@reduxjs/toolkit": "^1.9.7",
+
+    "react-redux": "^8.1.3",
+
+    "recharts": "^2.10.3",
+
+    "lucide-react": "^0.292.0"
+
+  },
+
+  "devDependencies": {
+
+    "@types/react": "^18.2.37",
+
+    "@types/react-dom": "^18.2.15",
+
+    "@types/node": "^20.9.0",
+
+    "typescript": "^5.2.2",
+
+    "vite": "^5.0.2",
+
+    "@vitejs/plugin-react": "^4.2.0",
+
+    "tailwindcss": "^3.3.6",
+
+    "postcss": "^8.4.32",
+
+    "autoprefixer": "^10.4.16",
+
+    "eslint": "^8.52.0",
+
+    "prettier": "^3.1.0"
+
+  }
+
+}
+
+
+
+=============================================================
+
+BACKEND — DETAILED REQUIREMENTS
+
+=============================================================
+
+
+
+--- config.py ---
+
+All constants in one place:
+
+- CAMERA_ID = 0
+
+- CAMERA_FPS = 30
+
+- CAMERA_WIDTH = 1280
+
+- CAMERA_HEIGHT = 720
+
+- MEDIAPIPE_MIN_DETECTION_CONFIDENCE = 0.5
+
+- MEDIAPIPE_MIN_TRACKING_CONFIDENCE = 0.5
+
+- MEDIAPIPE_MODEL_COMPLEXITY = 1
+
+- ONE_EURO_FREQ = 30
+
+- ONE_EURO_MINCUTOFF = 1.0
+
+- ONE_EURO_BETA = 0.0
+
+- ONE_EURO_DCUTOFF = 1.0
+
+- WEBSOCKET_HOST = "0.0.0.0"
+
+- WEBSOCKET_PORT = 8000
+
+- WEBSOCKET_UPDATE_INTERVAL_MS = 100
+
+- SESSION_PRESENCE_TIMEOUT_SECONDS = 30
+
+- DATABASE_PATH = "data/sessions.db"
+
+- FORM_SCORE_BASE = 100
+
+
+
+Exercise thresholds for all 6 exercises:
+
+  BICEP_CURL, LAT_PULLDOWN, SQUAT,
+
+  SHOULDER_PRESS, DEADLIFT, PLANK
+
+Each with:
+
+  - angle thresholds (top/bottom/incomplete)
+
+  - errors dict with threshold, penalty, message
+
+
+
+--- one_euro_filter.py ---
+
+Full One-Euro Filter implementation:
+
+- __init__(freq, mincutoff, beta, dcutoff)
+
+- filter(value) → smoothed value
+
+- reset()
+
+- Internal low_pass_filter + alpha calculation
+
+- Handles initialization (first frame)
+
+
+
+--- angle_calculator.py ---
+
+- calculate_angle_3d(p1, p2, p3) using dot product
+
+  Returns angle in degrees (0-180)
+
+- calculate_angle_2d(p1, p2, p3) using atan2
+
+  Returns angle in degrees (0-360)
+
+- calculate_distance(p1, p2) Euclidean 2D
+
+- calculate_distance_3d(p1, p2) Euclidean 3D
+
+- normalize_landmark(landmark, w, h)
+
+- get_landmark_position(landmarks, index, w, h)
+
+
+
+--- pose_detector.py ---
+
+PoseDetector class:
+
+- __init__ with MediaPipe Pose config
+
+- detect(frame) → (landmarks, annotated_frame)
+
+  Converts BGR→RGB, runs MediaPipe, draws skeleton
+
+  Returns None landmarks if no person detected
+
+- get_landmark_names() → list of 33 landmark names
+
+- close()
+
+
+
+--- exercises/base.py ---
+
+Abstract Exercise base class:
+
+- ExerciseState enum: READY, ACTIVE, BOTTOM, TOP, HOLD
+
+- Exercise ABC with:
+
+  - __init__(name, config)
+
+  - abstract process_frame(landmarks, w, h) → Dict
+
+  - abstract detect_exercise(landmarks) → bool
+
+  - reset()
+
+  - get_summary() → Dict with total_reps, avg_form_score, reps
+
+
+
+--- exercises/bicep_curl.py ---
+
+BicepCurl(Exercise):
+
+FSM: READY (elbow > 160°) → CURLING (elbow < 90°) → READY
+
+- One-Euro filters for left + right elbow angles
+
+- Hysteresis: top=170°, bottom=85°
+
+- Track both arms, use average angle
+
+- Error detection:
+
+  * lean_back: shoulder angle > 120° → -5pts
+
+  * elbow_flare: lateral movement > 15cm → -3pts
+
+  * incomplete_range: bottom angle > 120° → -2pts
+
+  * swinging: torso rotation > 10° → -4pts
+
+- Per-rep data: rep_number, peak_angle, form_score, errors
+
+- Returns dict with all angles, errors, form_score
+
+
+
+--- exercises/lat_pulldown.py ---
+
+LatPulldown(Exercise):
+
+FSM: READY (elbow > 140°) → PULLING (elbow < 100°) → READY
+
+- One-Euro filters for elbow angles
+
+- Hysteresis: top=145°, bottom=95°
+
+- Error detection:
+
+  * elbows_too_high: elbow angle > 110° at bottom → -5pts
+
+  * forward_lean: torso angle > 20° → -4pts
+
+  * incomplete_pull: elbow angle < 80° → -3pts
+
+  * wide_elbows: elbow spread > 45cm → -3pts
+
+- Returns dict with angles, errors, form_score
+
+
+
+--- exercises/squat.py ---
+
+Squat(Exercise):
+
+FSM: READY (knee > 170°) → SQUATTING (knee < 90°) → READY
+
+- One-Euro filters for knee angles (both legs)
+
+- Hysteresis: top=165°, bottom=95°
+
+- Error detection:
+
+  * knees_cave: knee inward > 15cm → -5pts
+
+  * incomplete_depth: bottom angle > 110° → -4pts
+
+  * forward_lean: torso angle > 25° → -4pts
+
+  * forward_knee: knee past ankle > 15cm → -3pts
+
+- Returns dict with angles, errors, form_score
+
+
+
+--- exercises/shoulder_press.py ---
+
+ShoulderPress(Exercise):
+
+FSM: READY (elbow < 90°) → PRESSING (elbow > 160°) → READY
+
+- One-Euro filters for elbow angles (both arms)
+
+- Hysteresis: top=155°, bottom=95°
+
+- Error detection:
+
+  * incomplete_lockout: top angle < 150° → -4pts
+
+  * elbow_flare: elbows not under wrists → -3pts
+
+  * torso_lean: lean > 15° → -3pts
+
+  * asymmetrical: arm difference > 10° → -2pts
+
+- Returns dict with angles, errors, form_score
+
+
+
+--- exercises/deadlift.py ---
+
+Deadlift(Exercise):
+
+FSM: READY (knee > 170°) → HINGING (knee < 80°) → READY
+
+- One-Euro filters for knee + back angles
+
+- Hysteresis: top=165°, bottom=85°
+
+- Error detection:
+
+  * back_rounding: back angle > 55° → -5pts
+
+  * incomplete_lockout: hip not extended → -4pts
+
+  * knee_drift: lateral movement > 10cm → -3pts
+
+  * bar_drift: bar path > 15cm from body → -2pts
+
+- Returns dict with angles, errors, form_score
+
+
+
+--- exercises/plank.py ---
+
+Plank(Exercise):
+
+NOT rep-based — time-based hold detection
+
+- Detect hold start when body is in plank position
+
+- Track hold duration in seconds (updates every frame)
+
+- Error detection:
+
+  * hip_sag: hip drop > 20cm → -5pts
+
+  * shoulder_rotation: rotation > 10° → -3pts
+
+  * head_drop: head drop > 15cm → -3pts
+
+- Returns dict with hold_duration, errors, form_score
+
+- get_summary() returns hold_duration instead of rep_count
+
+
+
+--- exercise_classifier.py ---
+
+ExerciseClassifier class:
+
+- __init__() with motion history buffer (10 frames)
+
+- classify(landmarks) → exercise_name or None
+
+- Uses motion patterns per exercise:
+
+  * Bicep Curl: large elbow angle change, arms below shoulders
+
+  * Lat Pulldown: elbow angle change + shoulder height drop
+
+  * Squat: large knee angle change, person standing
+
+  * Shoulder Press: elbow angle change, arms above shoulders
+
+  * Deadlift: knee + hip angle change, torso hinge
+
+  * Plank: horizontal body position, static
+
+- Returns None until 10 frames analyzed
+
+- Returns most likely exercise name
+
+- Confidence threshold: 0.7
+
+
+
+--- form_validator.py ---
+
+FormValidator class (optional, can be integrated into exercises):
+
+- validate_form(exercise, angles, landmarks) → errors list
+
+- Each error: {type, confidence, penalty, message}
+
+- Configurable thresholds via config.py
+
+- Returns sorted by penalty (highest first)
+
+
+
+--- session_manager.py ---
+
+SessionManager class:
+
+- __init__()
+
+- update(landmarks, w, h, frame) → session_data Dict
+
+- Session lifecycle:
+
+  * IDLE: No person detected
+
+  * ACTIVE: Person present, tracking
+
+  * ENDING: Person absent for < 30s
+
+  * ENDED: Person absent for > 30s → save session
+
+- Auto-detects exercise, switches if pattern changes
+
+- Tracks: session_id, user_id, start_time, end_time,
+
+          exercise, reps, form_scores, rep_history
+
+- save_session(db) → saves to SQLite
+
+- get_live_data() → current frame data for WebSocket
+
+- current_exercise: Exercise object (one of 6)
+
+- presence_timeout_counter: tracks absence duration
+
+
+
+WebSocket payload (every 100ms):
+
+{
+
+  "timestamp": int (unix timestamp),
+
+  "session_id": str (UUID),
+
+  "user_id": str,
+
+  "exercise": str (exercise name),
+
+  "rep_count": int,
+
+  "current_rep_stage": str (READY, CURLING, BOTTOM, etc),
+
+  "angles": {
+
+    "left_elbow": float,
+
+    "right_elbow": float,
+
+    "left_knee": float,
+
+    "right_knee": float,
+
+    "left_shoulder": float,
+
+    "right_shoulder": float,
+
+    ...exercise-specific angles...
+
+  },
+
+  "form_errors": [
+
+    {
+
+      "type": str (error type),
+
+      "confidence": float (0-1),
+
+      "penalty": int (points deducted),
+
+      "message": str (coaching tip)
+
+    }
+
+  ],
+
+  "form_score": int (0-100),
+
+  "rep_history": [
+
+    {
+
+      "rep_number": int,
+
+      "peak_angle": float,
+
+      "form_score": int,
+
+      "errors": [error objects]
+
+    }
+
+  ],
+
+  "session_status": str (ACTIVE, ENDING, IDLE)
+
+}
+
+
+
+Session summary payload (on session end):
+
+{
+
+  "type": "session_summary",
+
+  "session_id": str,
+
+  "user_id": str,
+
+  "exercise": str,
+
+  "total_reps": int,
+
+  "avg_form_score": float,
+
+  "best_rep": { rep object },
+
+  "worst_rep": { rep object },
+
+  "top_errors": [
+
+    {"type": str, "count": int, "frequency": float}
+
+  ],
+
+  "duration_seconds": int,
+
+  "timestamp": int
+
+}
+
+
+
+--- database.py ---
+
+SQLAlchemy + SQLite:
+
+Tables:
+
+  users(
+
+    id: UUID primary key,
+
+    pin: str (4-6 digits, hashed),
+
+    name: str,
+
+    gym_id: str,
+
+    created_at: datetime
+
+  )
+
+  sessions(
+
+    id: UUID primary key,
+
+    user_id: UUID foreign key,
+
+    exercise: str,
+
+    total_reps: int,
+
+    avg_form_score: float,
+
+    duration_seconds: int,
+
+    data_json: JSON (full rep history),
+
+    created_at: datetime
+
+  )
+
+
+
+Functions:
+
+- init_db() → creates tables if not exist
+
+- save_session(session_data: dict) → Session object
+
+- get_user_sessions(user_id: str, limit=20) → list
+
+- get_user_by_pin(pin: str) → User or None
+
+- create_user(pin: str, name: str, gym_id: str) → User
+
+- get_session(session_id: str) → Session or None
+
+- delete_old_sessions(days=30) → deletes sessions older than N days
+
+
+
+--- websocket_server.py ---
+
+FastAPI app with:
+
+- GET /health → {"status": "ok"}
+
+- POST /auth/login → {pin} → {user_id, token, name}
+
+  * Hash pin, lookup in DB
+
+  * Generate JWT token (exp: 24 hours)
+
+  * Return user data
+
+- GET /sessions/{user_id} → list of past sessions (requires auth)
+
+  * Returns last 20 sessions
+
+  * Paginated if needed
+
+- WebSocket /ws/{user_id} → real-time stream (requires JWT token)
+
+  * On connect: verify token, add to connection manager
+
+  * Loop: get live data from session_manager
+
+           send JSON payload every 100ms
+
+           handle incoming messages (pause, resume, end)
+
+  * On disconnect: clean up, save session if active
+
+- CORS enabled for frontend origin (http://localhost:5173 for dev)
+
+- Connection manager: track active WebSocket connections
+
+- Error handling: graceful disconnect on invalid token
+
+
+
+--- main.py ---
+
+Entry point:
+
+- Initialize camera (OpenCV VideoCapture)
+
+- Initialize PoseDetector
+
+- Initialize SessionManager
+
+- Initialize ExerciseClassifier
+
+- Initialize database
+
+- Create FastAPI app
+
+- Start camera loop in background thread:
+
+  * Read frame from camera
+
+  * Detect pose (skip if no person)
+
+  * Update session_manager with landmarks
+
+  * Store latest data for WebSocket clients
+
+  * Display FPS counter on frame (for debugging)
+
+  * Handle frame drops gracefully
+
+- Start FastAPI server (uvicorn):
+
+  * uvicorn.run(app, host="0.0.0.0", port=8000)
+
+- Graceful shutdown on Ctrl+C:
+
+  * Close camera
+
+  * Close PoseDetector
+
+  * Save any active session
+
+  * Close database connection
+
+
+
+--- requirements.txt ---
+
+fastapi==0.104.1
+
+uvicorn[standard]==0.24.0
+
+mediapipe==0.10.5
+
+opencv-python==4.8.1.78
+
+numpy==1.24.3
+
+sqlalchemy==2.0.23
+
+python-jose[cryptography]==3.3.0
+
+python-multipart==0.0.6
+
+websockets==12.0
+
+pydantic==2.5.0
+
+python-dotenv==1.0.0
+
+
+
+=============================================================
+
+FRONTEND — DETAILED REQUIREMENTS
+
+=============================================================
+
+
+
+--- types/workout.ts ---
+
+TypeScript interfaces:
+
+interface FormError {
+
+  type: string;
+
+  confidence: number;
+
+  penalty: number;
+
+  message: string;
+
+}
+
+
+
+interface RepData {
+
+  rep_number: number;
+
+  peak_angle: number;
+
+  form_score: number;
+
+  errors: FormError[];
+
+}
+
+
+
+interface WorkoutPayload {
+
+  timestamp: number;
+
+  session_id: string;
+
+  user_id: string;
+
+  exercise: string;
+
+  rep_count: number;
+
+  current_rep_stage: string;
+
+  angles: Record<string, number>;
+
+  form_errors: FormError[];
+
+  form_score: number;
+
+  rep_history: RepData[];
+
+  session_status: string;
+
+}
+
+
+
+interface SessionSummary {
+
+  session_id: string;
+
+  user_id: string;
+
+  exercise: string;
+
+  total_reps: number;
+
+  avg_form_score: number;
+
+  best_rep: RepData;
+
+  worst_rep: RepData;
+
+  top_errors: Array<{type: string; count: number; frequency: number}>;
+
+  duration_seconds: number;
+
+  timestamp: number;
+
+}
+
+
+
+interface User {
+
+  id: string;
+
+  name: string;
+
+  gym_id: string;
+
+}
+
+
+
+--- store/workoutSlice.ts ---
+
+Redux slice with state:
+
+interface WorkoutState {
+
+  currentExercise: string | null;
+
+  repCount: number;
+
+  formScore: number;
+
+  errors: FormError[];
+
+  repHistory: RepData[];
+
+  sessionStatus: string;
+
+  angles: Record<string, number>;
+
+  isConnected: boolean;
+
+  sessionSummary: SessionSummary | null;
+
+  sessionId: string | null;
+
+}
+
+
+
+Actions:
+
+- updateWorkout(payload: WorkoutPayload)
+
+- setConnected(isConnected: boolean)
+
+- setSessionSummary(summary: SessionSummary)
+
+- resetSession()
+
+- setExercise(exercise: string)
+
+
+
+--- hooks/useWebSocket.ts ---
+
+Custom React hook:
+
+export const useWebSocket = (userId: string) => {
+
+  const dispatch = useDispatch();
+
+  const [isConnected, setIsConnected] = useState(false);
+
+  const [error, setError] = useState<string | null>(null);
+
+  const wsRef = useRef<WebSocket | null>(null);
+
+
+
+  useEffect(() => {
+
+    if (!userId) return;
+
+
+
+    const token = localStorage.getItem('token');
+
+    const wsUrl = `ws://localhost:8000/ws/${userId}?token=${token}`;
+
+
+
+    wsRef.current = new WebSocket(wsUrl);
+
+
+
+    wsRef.current.onopen = () => {
+
+      setIsConnected(true);
+
+      setError(null);
+
+    };
+
+
+
+    wsRef.current.onmessage = (event) => {
+
+      const payload = JSON.parse(event.data);
+
+      dispatch(updateWorkout(payload));
+
+    };
+
+
+
+    wsRef.current.onerror = (event) => {
+
+      setError('WebSocket error');
+
+      setIsConnected(false);
+
+    };
+
+
+
+    wsRef.current.onclose = () => {
+
+      setIsConnected(false);
+
+      // Auto-reconnect after 2 seconds
+
+      setTimeout(() => {
+
+        // Reconnect logic
+
+      }, 2000);
+
+    };
+
+
+
+    return () => {
+
+      if (wsRef.current) wsRef.current.close();
+
+    };
+
+  }, [userId, dispatch]);
+
+
+
+  return { isConnected, error };
+
+};
+
+
+
+--- screens/Login.tsx ---
+
+- useState for pin input
+
+- Large FitFlex logo/title
+
+- PIN input field (6 digits, numeric keypad)
+
+- "Enter Gym" button
+
+- Loading state during login
+
+- Error message display
+
+- Calls POST /auth/login
+
+- On success: saves user_id + token + name to localStorage
+
+- Navigates to /dashboard
+
+- Clean, dark gym-themed design
+
+- Responsive (mobile-first)
+
+
+
+--- screens/LiveDashboard.tsx ---
+
+Main screen during workout:
+
+- Top bar: ExerciseLabel component + session status indicator
+
+- CENTER: RepCounter component (huge animated number)
+
+- Form score gauge (FormGauge component, large)
+
+- Error cards section (ErrorAlert components, scrollable)
+
+  Each card: error type + coaching message
+
+  Auto-dismiss after 5 seconds
+
+- Rep history mini-list (last 5 reps with scores)
+
+  Small cards showing rep #, peak angle, form score
+
+- Bottom: "End Session" button (red)
+
+- Updates in real-time from WebSocket
+
+- useWebSocket hook connected
+
+- useSelector to get workout state
+
+- Responsive layout (stack on mobile, side-by-side on desktop)
+
+
+
+--- screens/RepBreakdown.tsx ---
+
+Per-rep analysis:
+
+- Header: "Rep Breakdown for [Exercise]"
+
+- List of all reps in current session
+
+- Each rep card shows:
+
+  * Rep number (large)
+
+  * Peak angle (e.g., "45°")
+
+  * Form score (color coded, FormGauge mini)
+
+  * Errors detected (list or expandable)
+
+- Sort by: rep number (ascending, rep 1 first)
+
+- Expandable rep cards to see full error details + penalty breakdown
+
+- Visual bar chart of form scores across reps (Recharts)
+
+- "Back to Dashboard" button
+
+- Responsive grid layout
+
+
+
+--- screens/SessionSummary.tsx ---
+
+Post-workout summary (shown when session ends):
+
+- Large exercise name + total duration (e.g., "Bicep Curl • 5:32")
+
+- Total reps completed (large number)
+
+- Average form score (FormGauge, large)
+
+- Best rep card (highest form score) + worst rep card (lowest)
+
+- Top 3 most common errors (list with frequency %)
+
+- Rep breakdown chart (Recharts: form score vs rep number, line chart)
+
+- Suggestions for next time based on errors (text)
+
+- "Save Session" button (auto-saves to DB, shows confirmation)
+
+- "New Workout" button (resets, goes back to Dashboard)
+
+- "View History" button (goes to /progress)
+
+- Responsive layout, centered content
+
+
+
+--- screens/Progress.tsx ---
+
+Historical tracking:
+
+- Header: "[User Name]'s Progress"
+
+- List of past sessions (paginated, 10 per page)
+
+- Each session card:
+
+  * Exercise name (bold)
+
+  * Date + time (e.g., "Nov 15, 2024 • 2:30 PM")
+
+  * Total reps + average form score
+
+  * Click to expand = see full summary
+
+- Filters (dropdown):
+
+  * Exercise type (All, Bicep Curl, Lat Pulldown, etc.)
+
+  * Date range (Last 7 days, Last 30 days, All time)
+
+- Charts section:
+
+  * Form score trend (Recharts line chart, last 20 sessions)
+
+  * Rep count trend (Recharts bar chart, last 20 sessions)
+
+  * Most common errors (Recharts pie chart, all sessions)
+
+- "Export Data" button (download as JSON file)
+
+- "Back to Dashboard" button
+
+- Loading state while fetching sessions
+
+- Responsive layout
+
+
+
+--- components/FormGauge.tsx ---
+
+Circular gauge component:
+
+- Props: score (0-100), size ('sm' | 'md' | 'lg')
+
+- SVG-based circular progress indicator
+
+- Color coding:
+
+  * 0-50: Red (#ef4444)
+
+  * 51-75: Yellow (#eab308)
+
+  * 76-100: Green (#22c55e)
+
+- Animated needle that sweeps to current score
+
+- Center text: score number + "FORM"
+
+- Smooth transitions on score change (CSS transition)
+
+- Sizes: sm=80px, md=120px, lg=160px
+
+- Responsive
+
+
+
+--- components/RepCounter.tsx ---
+
+Large animated rep display:
+
+- Props: count (number), stage (string)
+
+- Display huge number (font-size: 120px on desktop, 80px on mobile)
+
+- Subtitle: current stage (READY, CURLING, BOTTOM, etc.)
+
+- Pulse animation on rep increment (CSS keyframes)
+
+- Background color changes with form score:
+
+  * 0-50: Dark red
+
+  * 51-75: Dark yellow
+
+  * 76-100: Dark green
+
+- Haptic feedback simulation (visual pulse on mobile)
+
+- Responsive sizing
+
+
+
+--- components/ErrorAlert.tsx ---
+
+Red error card component:
+
+- Props: error (FormError), onDismiss? (callback)
+
+- Layout:
+
+  * Left: error icon (exclamation triangle from lucide-react)
+
+  * Center: error type (bold) + message (smaller text)
+
+  * Right: penalty points (-5pts, red)
+
+- Slide-in animation on new error (CSS keyframes)
+
+- Auto-dismiss after 5 seconds (setTimeout)
+
+- Different background colors for different error types
+
+- Hover effect: slightly darker
+
+- Responsive padding
+
+
+
+--- components/ExerciseLabel.tsx ---
+
+Exercise name display:
+
+- Props: exercise (string), status (string)
+
+- Large bold text with exercise name
+
+- Status badge (ACTIVE, PAUSED, ENDED)
+
+  * ACTIVE: green background
+
+  * PAUSED: yellow background
+
+  * ENDED: red background
+
+- Animated background gradient (CSS animation)
+
+- Responsive font size
+
+
+
+--- components/NavBar.tsx ---
+
+Top navigation bar:
+
+- Left: FitFlex logo (text or SVG)
+
+- Center: current page title (from React Router location)
+
+- Right: user name + logout button
+
+- Sticky, always visible (position: sticky)
+
+- Dark background (#0f172a), light text
+
+- Logout: clears localStorage, redirects to /login
+
+- Responsive: hamburger menu on mobile (optional)
+
+
+
+--- App.tsx ---
+
+Main app router:
+
+- useState for currentUser, isLoggedIn
+
+- useWebSocket hook (only if logged in + on dashboard)
+
+- Redux Provider wrapper
+
+- React Router with routes:
+
+  * /login → Login screen
+
+  * /dashboard → LiveDashboard (protected)
+
+  * /rep-breakdown → RepBreakdown (protected)
+
+  * /summary → SessionSummary (protected)
+
+  * /progress → Progress screen (protected)
+
+  * / → redirects to /login or /dashboard
+
+- Auth guard: redirect to /login if not authenticated
+
+- Load user from localStorage on app start
+
+- Logout handler: clears localStorage, redirects
+
+
+
+--- main.tsx ---
+
+React entry point:
+
+- ReactDOM.createRoot(document.getElementById('root'))
+
+- <Provider store={store}> wrapper
+
+- <App /> component
+
+- Error boundary for crash handling (optional)
+
+
+
+--- index.css ---
+
+Global styles:
+
+- Tailwind directives (@tailwind base, components, utilities)
+
+- Custom dark gym theme
+
+- Font: Inter or Roboto
+
+- Color palette:
+
+  * Primary: #10b981 (emerald green)
+
+  * Secondary: #1f2937 (dark gray)
+
+  * Accent: #ef4444 (red for errors)
+
+  * Background: #0f172a (very dark blue)
+
+  * Text: #f3f4f6 (light gray)
+
+- Custom animations:
+
+  * @keyframes pulse-rep (scale up on rep increment)
+
+  * @keyframes slide-in (error cards)
+
+  * @keyframes gradient-shift (exercise label)
+
+
+
+--- public/manifest.json ---
+
+PWA manifest:
+
+{
+
+  "name": "FitFlex",
+
+  "short_name": "FitFlex",
+
+  "start_url": "/",
+
+  "display": "standalone",
+
+  "theme_color": "#10b981",
+
+  "background_color": "#0f172a",
+
+  "scope": "/",
+
+  "icons": [
+
+    {
+
+      "src": "/icon-192.png",
+
+      "sizes": "192x192",
+
+      "type": "image/png"
+
+    },
+
+    {
+
+      "src": "/icon-512.png",
+
+      "sizes": "512x512",
+
+      "type": "image/png"
+
+    }
+
+  ]
+
+}
+
+
+
+--- public/sw.js ---
+
+Service worker for PWA:
+
+- Cache static assets (HTML, CSS, JS) on install
+
+- Network-first strategy for WebSocket (never cache)
+
+- Offline fallback page (optional)
+
+- Cache busting on version change
+
+- Background sync for session data (optional)
+
+
+
+--- vite.config.ts ---
+
+Vite config:
+
+import { defineConfig } from 'vite'
+
+import react from '@vitejs/plugin-react'
+
+
+
+export default defineConfig({
+
+  plugins: [react()],
+
+  server: {
+
+    port: 5173,
+
+    proxy: {
+
+      '/api': {
+
+        target: 'http://localhost:8000',
+
+        changeOrigin: true,
+
+      }
+
+    }
+
+  },
+
+  build: {
+
+    outDir: 'dist',
+
+    sourcemap: true,
+
+  }
+
+})
+
+
+
+--- tailwind.config.ts ---
+
+Tailwind config:
+
+export default {
+
+  darkMode: 'class',
+
+  content: [
+
+    "./index.html",
+
+    "./src/**/*.{js,ts,jsx,tsx}",
+
+  ],
+
+  theme: {
+
+    extend: {
+
+      colors: {
+
+        gym: {
+
+          50: '#f0fdf4',
+
+          500: '#10b981',
+
+          900: '#0f172a',
+
+        },
+
+        error: '#ef4444',
+
+        warning: '#eab308',
+
+      },
+
+      fontFamily: {
+
+        sans: ['Inter', 'sans-serif'],
+
+      },
+
+    },
+
+  },
+
+  plugins: [],
+
+}
+
+
+
+--- tsconfig.json ---
+
+{
+
+  "compilerOptions": {
+
+    "target": "ES2020",
+
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+
+    "module": "ESNext",
+
+    "jsx": "react-jsx",
+
+    "strict": true,
+
+    "esModuleInterop": true,
+
+    "skipLibCheck": true,
+
+    "forceConsistentCasingInFileNames": true,
+
+    "moduleResolution": "bundler",
+
+    "resolveJsonModule": true,
+
+    "paths": {
+
+      "@/*": ["./src/*"]
+
+    }
+
+  },
+
+  "include": ["src"],
+
+  "references": [{ "path": "./tsconfig.node.json" }]
+
+}
+
+
+
+--- package.json ---
+
+{
+
+  "name": "fitflex-frontend",
+
+  "private": true,
+
+  "version": "1.0.0",
+
+  "type": "module",
+
+  "scripts": {
+
+    "dev": "vite",
+
+    "build": "tsc && vite build",
+
+    "preview": "vite preview",
+
+    "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+
+    "format": "prettier --write src"
+
+  },
+
+  "dependencies": {
+
+    "react": "^18.2.0",
+
+    "react-dom": "^18.2.0",
+
+    "react-router-dom": "^6.20.0",
+
+    "@reduxjs/toolkit": "^1.9.7",
+
+    "react-redux": "^8.1.3",
+
+    "recharts": "^2.10.3",
+
+    "lucide-react": "^0.292.0"
+
+  },
+
+  "devDependencies": {
+
+    "@types/react": "^18.2.37",
+
+    "@types/react-dom": "^18.2.15",
+
+    "@types/node": "^20.9.0",
+
+    "typescript": "^5.2.2",
+
+    "vite": "^5.0.2",
+
+    "@vitejs/plugin-react": "^4.2.0",
+
+    "tailwindcss": "^3.3.6",
+
+    "postcss": "^8.4.32",
+
+    "autoprefixer": "^10.4.16",
+
+    "eslint": "^8.52.0",
+
+    "@typescript-eslint/eslint-plugin": "^6.10.0",
+
+    "@typescript-eslint/parser": "^6.10.0",
+
+    "prettier": "^3.1.0"
+
+  }
+
+}
+
+
+
+=============================================================
+
+DEPLOYMENT INSTRUCTIONS
+
+=============================================================
+
+
+
+Backend (Gym Server):
+
+1. Install Python 3.11+
+
+2. Clone repo, cd fitflex-backend
+
+3. Create venv: python -m venv venv
+
+4. Activate: source venv/bin/activate (or venv\Scripts\activate on Windows)
+
+5. Install: pip install -r requirements.txt
+
+6. Run: python main.py
+
+7. Backend starts on http://0.0.0.0:8000
+
+8. To run as service: use systemd (Linux) or Task Scheduler (Windows)
+
+
+
+Frontend (User's Phone):
+
+1. cd fitflex-frontend
+
+2. npm install
+
+3. npm run build
+
+4. Serve dist/ folder (use any static server or Netlify/Vercel)
+
+5. OR npm run dev for local testing
+
+6. Access on phone via http://[gym-server-ip]:5173
+
+7. Can be installed as PWA (Add to Home Screen on mobile)
+
+
+
+Testing:
+
+1. Start backend: python main.py
+
+2. In another terminal: cd fitflex-frontend && npm run dev
+
+3. Open http://localhost:5173 in browser
+
+4. Login with PIN (default: 1234)
+
+5. Stand in front of camera, perform exercise
+
+6. See real-time data on phone
+
+
+
+=============================================================
+
+IMPORTANT NOTES
+
+=============================================================
+
+
+
+- All code should be production-ready, well-commented, and handle errors gracefully
+
+- Use TypeScript for type safety (frontend)
+
+- Use type hints in Python (backend)
+
+- Handle WebSocket disconnects with auto-reconnect logic
+
+- Validate all user input (both frontend and backend)
+
+- Sanitize database inputs to prevent SQL injection
+
+- Use HTTPS/WSS in production (not HTTP/WS)
+
+- Store JWT tokens securely (httpOnly cookies preferred)
+
+- Test on actual phone/WiFi before deploying to gym
+
+- Add logging for debugging (Python logging, browser console)
+
+- Optimize images for mobile (compress, responsive sizes)
+
+- Cache static assets for offline support (PWA)
+
+- Monitor performance: aim for 30+ FPS on camera, <200ms WebSocket latency
+
+
+
+=============================================================
+
+START BUILDING NOW
+
+=============================================================
+
+
+
+Create all files listed above with complete, working code.
+
+Ensure all files are connected and the system works end-to-end.
+
+Follow the specifications exactly.
+
+Make the code production-ready, not just a prototype.

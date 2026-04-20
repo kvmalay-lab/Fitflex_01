@@ -1,0 +1,18 @@
+{
+  "name": "FitFlex",
+  "short_name": "FitFlex",
+  "description": "AI Gym Coaching Platform",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#10b981",
+  "background_color": "#0f172a",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='40' fill='%2310b981'/><text x='96' y='130' font-size='90' text-anchor='middle' font-weight='900' font-family='Arial' fill='white'>FF</text></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    }
+  ]
+}

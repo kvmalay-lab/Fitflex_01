@@ -1,5 +1,9 @@
 fastapi
-uvicorn
-opencv-python
-mediapipe
+uvicorn[standard]
 numpy
+sqlalchemy
+python-jose[cryptography]
+python-multipart
+websockets
+pydantic
+python-dotenv

@@ -1,109 +1,25 @@
 @import "tailwindcss";
 
-@theme {
-    /* Base Backgrounds */
-    --color-background: #09090b;
-    --color-surface: #09090b;
-    --color-surface-dim: #09090b;
-    --color-inverse-surface: #f4f4f5;
-
-    /* Card Backgrounds */
-    --color-surface-container-lowest: #18181b;
-    --color-surface-container-low: #18181b;
-    --color-surface-container: #18181b;
-    
-    /* Raised/Hover Backgrounds */
-    --color-surface-container-high: #27272a;
-    --color-surface-container-highest: #27272a;
-    --color-surface-variant: #27272a;
-    
-    /* Text Colors */
-    --color-on-background: #f4f4f5;
-    --color-on-surface: #f4f4f5;
-    --color-on-surface-variant: #a1a1aa;
-    --color-inverse-on-surface: #09090b;
-    
-    /* Borders / Outlines */
-    --color-outline: #3f3f46;
-    --color-outline-variant: #27272a;
-
-    /* Primary (Indigo 500) */
-    --color-primary: #6366f1;
-    --color-primary-container: #18181b;
-    --color-on-primary-container: #ffffff;
-    --color-on-primary: #ffffff;
-    
-    /* Secondary (mapped to Emerald visually) */
-    --color-secondary: #09090b;
-    --color-secondary-container: #18181b;
-    --color-on-secondary-container: #a1a1aa;
-
-    /* Tertiary (Emerald 500 equivalent for success/metrics) */
-    --color-tertiary: #10b981;
-    --color-on-tertiary: #ffffff;
-    --color-tertiary-container: #18181b;
-    --color-on-tertiary-container: #10b981;
-
-    /* Error (Red 500) */
-    --color-error: #ef4444;
-    --color-error-container: #7f1d1d;
-    --color-on-error: #ffffff;
-    --color-on-error-container: #fca5a5;
-
-    /* Fonts */
-    --font-headline: "Helvetica Neue", Arial, sans-serif;
-    --font-body: "Helvetica Neue", Arial, sans-serif;
-    --font-label: "Helvetica Neue", Arial, sans-serif;
-
-    /* Border Radius matching original requested style */
-    --radius-lg: 8px; 
-    --radius-xl: 16px;
-    --radius-2xl: 16px;
-}
-
 body {
-    background-color: var(--color-background);
-    color: var(--color-on-background);
-    font-family: var(--font-body);
-    margin: 0;
-    padding: 0;
+  background-color: #0f172a;
+  color: #f1f5f9;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
 }
 
-/* Base Utility Classes without !important */
-.bg-surface-container, 
-.bg-surface-container-low, 
-.bg-surface-container-highest {
-    background-color: var(--color-surface-container);
-    border: 1px solid var(--color-outline-variant);
-    border-radius: var(--radius-xl);
+* {
+  box-sizing: border-box;
 }
 
-.hover\:bg-surface-container-high:hover {
-    background-color: var(--color-surface-container-high);
+::-webkit-scrollbar {
+  width: 4px;
 }
-
-/* Accent Gradients */
-[class*="from-primary"][class*="to-primary"] {
-    background: linear-gradient(135deg, var(--color-primary), #a855f7);
-    color: white;
+::-webkit-scrollbar-track {
+  background: transparent;
 }
-
-/* Reset Specific Text Colors */
-.text-primary { color: var(--color-primary); }
-.text-tertiary { color: var(--color-tertiary); }
-.text-error { color: var(--color-error); }
-
-/* Typography */
-.font-label, .stat-label {
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--color-on-surface-variant);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 2px;
 }
-
-/* Icon Resets */
-.material-symbols-outlined {
-    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
-}
-.icon-fill { font-variation-settings: 'FILL' 1; }
