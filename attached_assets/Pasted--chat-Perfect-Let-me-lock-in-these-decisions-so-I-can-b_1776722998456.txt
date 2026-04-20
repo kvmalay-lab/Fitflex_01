@@ -1,0 +1,967 @@
+/chat Perfect. Let me lock in these decisions so I can build the complete, production-ready codebase:
+
+---
+
+## **YOUR ANSWERS**
+
+**1. Mobile App Target:**
+**React (web PWA)** — faster to build, works on any phone browser via gym WiFi, deployable as standalone app. We can always convert to React Native later if needed.
+
+**2. Additional Exercises:**
+**Yes, fully implement:** Squat, Shoulder Press, Deadlift with the same level of form error detection as Bicep Curl + Lat Pulldown. That's **6 total exercises** to start.
+
+**3. User Auth:**
+**Simple gym PIN / membership ID login** — no email/password complexity yet. User enters 4-6 digit PIN or scans QR code → session tied to user ID. JWT tokens for WebSocket auth (simple, secure).
+
+**4. Camera Count:**
+**Single camera feed for now** — one camera per gym or station. Architecture supports multi-camera expansion later (just add camera_id to payloads).
+
+**5. Database:**
+**SQLite (local)** — simple, no external dependencies, stores session summaries locally on gym server. Can migrate to PostgreSQL later if scaling to multiple gyms.
+
+---
+
+## **DEFAULTS I'M SETTING**
+
+- **Backend:** FastAPI + WebSocket (async, fast, production-ready)
+- **Smoothing:** One-Euro Filter (as specified)
+- **Rep Detection:** FSM with hysteresis (prevents jitter)
+- **Form Score:** Base 100, deductions per error, clamped 0-100
+- **Session Auto-Detection:** Presence → start, 30s absence → end
+- **WebSocket Interval:** 100ms updates (10 Hz)
+- **Storage:** Session JSONs + SQLite DB on gym server
+- **Privacy:** No raw video, only pose landmarks stored
+- **Exercises:** Bicep Curl, Lat Pulldown, Squat, Shoulder Press, Deadlift, Plank (6 total)
+- **Error Detection:** Per-exercise form validators with configurable thresholds
+- **Mobile UI:** React (web), responsive design, works on phone/tablet/desktop
+
+---
+
+## **NOW I'M BUILDING THE COMPLETE CODEBASE**
+
+I'll generate **all files** organized by folder structure, fully connected and ready to run. Here we go:
+
+---
+
+# **FITFLEX — COMPLETE CODEBASE**
+
+## **BACKEND STRUCTURE**
+
+```
+fitflex-backend/
+├── main.py                          # Entry point
+├── config.py                        # All constants & thresholds
+├── requirements.txt                 # Dependencies
+├── pose_detector.py                 # MediaPipe extraction
+├── one_euro_filter.py               # Signal smoothing
+├── angle_calculator.py              # Joint angle math
+├── exercise_classifier.py           # Auto-detect exercise
+├── form_validator.py                # Error detection + scoring
+├── session_manager.py               # Session lifecycle
+├── websocket_server.py              # FastAPI + WebSocket
+├── database.py                      # SQLite ORM
+├── exercises/
+│   ├── __init__.py
+│   ├── base.py                      # Abstract FSM base class
+│   ├── bicep_curl.py                # Bicep curl FSM + validator
+│   ├── lat_pulldown.py              # Lat pulldown FSM + validator
+│   ├── squat.py                     # Squat FSM + validator
+│   ├── shoulder_press.py            # Shoulder press FSM + validator
+│   ├── deadlift.py                  # Deadlift FSM + validator
+│   └── plank.py                     # Plank FSM + validator
+└── data/
+    └── sessions.db                  # SQLite database
+```
+
+---
+
+## **BACKEND CODE**
+
+### **1. `config.py`** — All thresholds & constants
+
+```python
+"""
+FitFlex Configuration — All thresholds, constants, and settings.
+"""
+
+# ============================================================================
+# CAMERA & POSE DETECTION
+# ============================================================================
+CAMERA_ID = 0
+CAMERA_FPS = 30
+CAMERA_WIDTH = 1280
+CAMERA_HEIGHT = 720
+MEDIAPIPE_MIN_DETECTION_CONFIDENCE = 0.5
+MEDIAPIPE_MIN_TRACKING_CONFIDENCE = 0.5
+MEDIAPIPE_MODEL_COMPLEXITY = 1  # 0=lite, 1=full, 2=heavy
+
+# ============================================================================
+# ONE-EURO FILTER (Smoothing)
+# ============================================================================
+ONE_EURO_FREQ = 30  # Camera FPS
+ONE_EURO_MINCUTOFF = 1.0
+ONE_EURO_BETA = 0.0
+ONE_EURO_DCUTOFF = 1.0
+
+# ============================================================================
+# EXERCISE DETECTION
+# ============================================================================
+EXERCISE_DETECTION_FRAMES = 5  # Frames to analyze for auto-detect
+EXERCISE_MOTION_THRESHOLD = 40  # Min angle change to detect motion
+
+# ============================================================================
+# FORM SCORING
+# ============================================================================
+FORM_SCORE_BASE = 100
+FORM_SCORE_MIN = 0
+FORM_SCORE_MAX = 100
+
+# ============================================================================
+# SESSION MANAGEMENT
+# ============================================================================
+SESSION_PRESENCE_TIMEOUT_SECONDS = 30  # Absence to end session
+SESSION_MIN_REPS_TO_SAVE = 1  # Min reps to save session
+SESSION_DATA_DIR = "data/sessions"
+
+# ============================================================================
+# WEBSOCKET
+# ============================================================================
+WEBSOCKET_UPDATE_INTERVAL_MS = 100  # Send update every 100ms (10 Hz)
+WEBSOCKET_HOST = "0.0.0.0"
+WEBSOCKET_PORT = 8000
+
+# ============================================================================
+# DATABASE
+# ============================================================================
+DATABASE_PATH = "data/sessions.db"
+
+# ============================================================================
+# BICEP CURL THRESHOLDS
+# ============================================================================
+BICEP_CURL = {
+    "elbow_angle_top": 160,          # Fully extended
+    "elbow_angle_bottom": 90,        # Fully curled
+    "elbow_angle_incomplete": 120,   # Incomplete range penalty threshold
+    "shoulder_angle_max": 120,       # Lean back penalty threshold
+    "elbow_flare_threshold": 15,     # cm lateral movement
+    "torso_rotation_threshold": 10,  # degrees
+    
+    "errors": {
+        "lean_back": {"threshold": 120, "penalty": 5, "message": "Keep your back straight"},
+        "elbow_flare": {"threshold": 15, "penalty": 3, "message": "Keep elbows close to body"},
+        "incomplete_range": {"threshold": 120, "penalty": 2, "message": "Go lower for full range"},
+        "swinging": {"threshold": 10, "penalty": 4, "message": "Control the movement, no swinging"},
+    }
+}
+
+# ============================================================================
+# LAT PULLDOWN THRESHOLDS
+# ============================================================================
+LAT_PULLDOWN = {
+    "elbow_angle_top": 140,          # Fully extended
+    "elbow_angle_bottom": 100,       # Fully pulled
+    "elbow_angle_incomplete": 80,    # Incomplete range penalty threshold
+    "torso_lean_forward_threshold": 20,  # degrees
+    "elbow_spread_threshold": 45,    # cm
+    
+    "errors": {
+        "elbows_too_high": {"threshold": 110, "penalty": 5, "message": "Pull elbows down further"},
+        "forward_lean": {"threshold": 20, "penalty": 4, "message": "Keep torso upright"},
+        "incomplete_pull": {"threshold": 80, "penalty": 3, "message": "Pull down more"},
+        "wide_elbows": {"threshold": 45, "penalty": 3, "message": "Bring elbows closer together"},
+    }
+}
+
+# ============================================================================
+# SQUAT THRESHOLDS
+# ============================================================================
+SQUAT = {
+    "knee_angle_bottom": 90,         # ~90 degrees at bottom
+    "knee_angle_top": 170,           # ~170 degrees at top
+    "knee_angle_incomplete": 110,    # Incomplete depth
+    "knee_cave_threshold": 15,       # cm inward movement
+    "torso_lean_threshold": 25,      # degrees forward lean
+    "forward_knee_threshold": 15,    # cm forward of ankle
+    
+    "errors": {
+        "knees_cave": {"threshold": 15, "penalty": 5, "message": "Keep knees aligned over toes"},
+        "incomplete_depth": {"threshold": 110, "penalty": 4, "message": "Squat deeper"},
+        "forward_lean": {"threshold": 25, "penalty": 4, "message": "Keep chest upright"},
+        "forward_knee": {"threshold": 15, "penalty": 3, "message": "Knees shouldn't go past toes"},
+    }
+}
+
+# ============================================================================
+# SHOULDER PRESS THRESHOLDS
+# ============================================================================
+SHOULDER_PRESS = {
+    "elbow_angle_top": 160,          # Fully extended overhead
+    "elbow_angle_bottom": 90,        # 90 degrees at shoulder height
+    "elbow_angle_incomplete": 110,   # Incomplete lockout
+    "elbow_flare_threshold": 20,     # cm lateral movement
+    "torso_lean_threshold": 15,      # degrees
+    
+    "errors": {
+        "incomplete_lockout": {"threshold": 110, "penalty": 4, "message": "Lock out arms fully"},
+        "elbow_flare": {"threshold": 20, "penalty": 3, "message": "Keep elbows under wrists"},
+        "torso_lean": {"threshold": 15, "penalty": 3, "message": "Keep torso straight"},
+        "asymmetrical": {"threshold": 10, "penalty": 2, "message": "Press evenly with both arms"},
+    }
+}
+
+# ============================================================================
+# DEADLIFT THRESHOLDS
+# ============================================================================
+DEADLIFT = {
+    "knee_angle_bottom": 80,         # ~80 degrees at bottom
+    "knee_angle_top": 170,           # ~170 degrees at top
+    "back_angle_bottom": 45,         # ~45 degrees forward lean at bottom
+    "back_angle_top": 5,             # ~5 degrees at top (upright)
+    "back_rounding_threshold": 55,   # Back angle > 55° = rounding
+    "knee_drift_threshold": 10,      # cm lateral movement
+    
+    "errors": {
+        "back_rounding": {"threshold": 55, "penalty": 5, "message": "Keep back straight"},
+        "incomplete_lockout": {"threshold": 170, "penalty": 4, "message": "Lock out hips fully"},
+        "knee_drift": {"threshold": 10, "penalty": 3, "message": "Keep knees stable"},
+        "bar_drift": {"threshold": 15, "penalty": 2, "message": "Keep bar close to body"},
+    }
+}
+
+# ============================================================================
+# PLANK THRESHOLDS
+# ============================================================================
+PLANK = {
+    "hip_sag_threshold": 20,         # cm drop = sag
+    "shoulder_angle_threshold": 10,  # degrees rotation
+    "head_drop_threshold": 15,       # cm drop
+    "hold_duration_min": 10,         # seconds
+    
+    "errors": {
+        "hip_sag": {"threshold": 20, "penalty": 5, "message": "Keep hips level"},
+        "shoulder_rotation": {"threshold": 10, "penalty": 3, "message": "Keep shoulders square"},
+        "head_drop": {"threshold": 15, "penalty": 3, "message": "Keep head neutral"},
+    }
+}
+
+# ============================================================================
+# EXERCISE DEFINITIONS
+# ============================================================================
+EXERCISES = {
+    "bicep_curl": {
+        "name": "Bicep Curl",
+        "config": BICEP_CURL,
+    },
+    "lat_pulldown": {
+        "name": "Lat Pulldown",
+        "config": LAT_PULLDOWN,
+    },
+    "squat": {
+        "name": "Squat",
+        "config": SQUAT,
+    },
+    "shoulder_press": {
+        "name": "Shoulder Press",
+        "config": SHOULDER_PRESS,
+    },
+    "deadlift": {
+        "name": "Deadlift",
+        "config": DEADLIFT,
+    },
+    "plank": {
+        "name": "Plank",
+        "config": PLANK,
+    },
+}
+```
+
+---
+
+### **2. `one_euro_filter.py`** — Signal smoothing
+
+```python
+"""
+One-Euro Filter for smooth angle calculations.
+Reduces jitter while preserving fast movements.
+"""
+
+import math
+
+
+class OneEuroFilter:
+    """
+    One Euro Filter — a low-latency, jitter-reducing filter.
+    
+    Ref: "1€ Filter: A Simple Speed-based Low-pass Filter for Noisy Input in Interactive Systems"
+    https://cristal.univ-lille.fr/~casiez/1euro/
+    """
+    
+    def __init__(self, freq=30.0, mincutoff=1.0, beta=0.0, dcutoff=1.0):
+        """
+        Args:
+            freq: Sampling frequency (Hz)
+            mincutoff: Minimum cutoff frequency (Hz)
+            beta: Speed coefficient (higher = faster response to motion)
+            dcutoff: Derivative cutoff frequency (Hz)
+        """
+        self.freq = freq
+        self.mincutoff = mincutoff
+        self.beta = beta
+        self.dcutoff = dcutoff
+        
+        self.last_value = None
+        self.last_dx = 0.0
+        self.last_time = None
+    
+    def _low_pass_filter(self, value, last_value, cutoff):
+        """Apply low-pass filter."""
+        alpha = self._alpha(cutoff)
+        return alpha * value + (1 - alpha) * last_value
+    
+    def _alpha(self, cutoff):
+        """Calculate alpha for low-pass filter."""
+        te = 1.0 / self.freq
+        tau = 1.0 / (2 * math.pi * cutoff)
+        return 1.0 / (1.0 + tau / te)
+    
+    def filter(self, value):
+        """
+        Filter a value.
+        
+        Args:
+            value: The noisy input value
+            
+        Returns:
+            Filtered value
+        """
+        if self.last_value is None:
+            self.last_value = value
+            self.last_dx = 0.0
+            return value
+        
+        # Estimate velocity (derivative)
+        dx = (value - self.last_value) * self.freq
+        
+        # Filter velocity
+        edx = self._low_pass_filter(dx, self.last_dx, self.dcutoff)
+        
+        # Adaptive cutoff: higher velocity = higher cutoff (faster response)
+        cutoff = self.mincutoff + self.beta * abs(edx)
+        
+        # Filter value
+        self.last_value = self._low_pass_filter(value, self.last_value, cutoff)
+        self.last_dx = edx
+        
+        return self.last_value
+    
+    def reset(self):
+        """Reset filter state."""
+        self.last_value = None
+        self.last_dx = 0.0
+```
+
+---
+
+### **3. `angle_calculator.py`** — Joint angle computation
+
+```python
+"""
+Calculate joint angles from MediaPipe landmarks.
+"""
+
+import math
+import numpy as np
+from typing import Tuple
+
+
+def calculate_angle_2d(p1: Tuple[float, float], p2: Tuple[float, float], p3: Tuple[float, float]) -> float:
+    """
+    Calculate angle between three 2D points using atan2.
+    
+    Args:
+        p1, p2, p3: (x, y) tuples. p2 is the vertex.
+        
+    Returns:
+        Angle in degrees (0-360)
+    """
+    x1, y1 = p1
+    x2, y2 = p2
+    x3, y3 = p3
+    
+    angle = math.degrees(math.atan2(y3 - y2, x3 - x2) - math.atan2(y1 - y2, x1 - x2))
+    
+    if angle < 0:
+        angle += 360
+    
+    return angle
+
+
+def calculate_angle_3d(p1: np.ndarray, p2: np.ndarray, p3: np.ndarray) -> float:
+    """
+    Calculate angle between three 3D points using dot product.
+    
+    Args:
+        p1, p2, p3: (x, y, z) numpy arrays. p2 is the vertex.
+        
+    Returns:
+        Angle in degrees (0-180)
+    """
+    # Vectors from p2 to p1 and p2 to p3
+    v1 = p1 - p2
+    v2 = p3 - p2
+    
+    # Normalize
+    v1_norm = np.linalg.norm(v1)
+    v2_norm = np.linalg.norm(v2)
+    
+    if v1_norm == 0 or v2_norm == 0:
+        return 0
+    
+    v1 = v1 / v1_norm
+    v2 = v2 / v2_norm
+    
+    # Dot product and angle
+    cos_angle = np.clip(np.dot(v1, v2), -1, 1)
+    angle = math.degrees(math.acos(cos_angle))
+    
+    return angle
+
+
+def calculate_distance(p1: Tuple[float, float], p2: Tuple[float, float]) -> float:
+    """
+    Calculate Euclidean distance between two 2D points.
+    """
+    x1, y1 = p1
+    x2, y2 = p2
+    return math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+
+
+def calculate_distance_3d(p1: np.ndarray, p2: np.ndarray) -> float:
+    """
+    Calculate Euclidean distance between two 3D points.
+    """
+    return np.linalg.norm(p1 - p2)
+
+
+def normalize_landmark(landmark, image_width: int, image_height: int) -> Tuple[float, float, float]:
+    """
+    Convert normalized MediaPipe landmark to pixel coordinates.
+    
+    Args:
+        landmark: MediaPipe landmark object
+        image_width: Image width in pixels
+        image_height: Image height in pixels
+        
+    Returns:
+        (x, y, z) in pixel coordinates
+    """
+    x = landmark.x * image_width
+    y = landmark.y * image_height
+    z = landmark.z * image_width  # Approximate z scaling
+    
+    return (x, y, z)
+
+
+def get_landmark_position(landmarks, landmark_index: int, image_width: int, image_height: int) -> Tuple[float, float, float]:
+    """
+    Get a single landmark position in pixel coordinates.
+    """
+    landmark = landmarks[landmark_index]
+    return normalize_landmark(landmark, image_width, image_height)
+```
+
+---
+
+### **4. `pose_detector.py`** — MediaPipe extraction
+
+```python
+"""
+Real-time pose detection using MediaPipe.
+"""
+
+import cv2
+import mediapipe as mp
+import numpy as np
+from typing import Optional, List, Tuple
+
+
+class PoseDetector:
+    """
+    Wrapper around MediaPipe Pose for real-time detection.
+    """
+    
+    def __init__(self, 
+                 static_image_mode: bool = False,
+                 min_detection_confidence: float = 0.5,
+                 min_tracking_confidence: float = 0.5,
+                 model_complexity: int = 1):
+        """
+        Initialize pose detector.
+        
+        Args:
+            static_image_mode: If True, detection runs on every frame (slower but more robust)
+            min_detection_confidence: Minimum confidence for person detection
+            min_tracking_confidence: Minimum confidence for pose tracking
+            model_complexity: 0=lite, 1=full, 2=heavy
+        """
+        self.mp_pose = mp.solutions.pose
+        self.mp_drawing = mp.solutions.drawing_utils
+        
+        self.pose = self.mp_pose.Pose(
+            static_image_mode=static_image_mode,
+            model_complexity=model_complexity,
+            smooth_landmarks=True,
+            min_detection_confidence=min_detection_confidence,
+            min_tracking_confidence=min_tracking_confidence,
+        )
+        
+        self.frame_count = 0
+    
+    def detect(self, frame: np.ndarray) -> Tuple[Optional[List], np.ndarray]:
+        """
+        Detect pose landmarks in a frame.
+        
+        Args:
+            frame: BGR image from OpenCV
+            
+        Returns:
+            (landmarks, annotated_frame) where landmarks is list of 33 landmarks or None
+        """
+        self.frame_count += 1
+        
+        # Convert BGR to RGB
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        rgb_frame.flags.writeable = False
+        
+        # Detect pose
+        results = self.pose.process(rgb_frame)
+        
+        # Draw landmarks on frame
+        rgb_frame.flags.writeable = True
+        rgb_frame = cv2.cvtColor(rgb_frame, cv2.COLOR_RGB2BGR)
+        
+        if results.pose_landmarks:
+            self.mp_drawing.draw_landmarks(
+                rgb_frame,
+                results.pose_landmarks,
+                self.mp_pose.POSE_CONNECTIONS,
+                self.mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=2),
+                self.mp_drawing.DrawingSpec(color=(255, 0, 0), thickness=2)
+            )
+            landmarks = results.pose_landmarks.landmark
+        else:
+            landmarks = None
+        
+        return landmarks, rgb_frame
+    
+    def get_landmark_names(self) -> List[str]:
+        """Get names of all 33 landmarks."""
+        return [lm.name for lm in self.mp_pose.PoseLandmark]
+    
+    def close(self):
+        """Close pose detector."""
+        self.pose.close()
+```
+
+---
+
+### **5. `exercises/base.py`** — Abstract FSM base class
+
+```python
+"""
+Abstract base class for exercise FSM.
+"""
+
+from abc import ABC, abstractmethod
+from enum import Enum
+from typing import Dict, List, Optional
+import mediapipe as mp
+
+
+class ExerciseState(Enum):
+    """Exercise states."""
+    READY = "ready"
+    ACTIVE = "active"
+    BOTTOM = "bottom"
+    TOP = "top"
+    HOLD = "hold"
+
+
+class Exercise(ABC):
+    """
+    Abstract base class for exercise rep counting and form validation.
+    """
+    
+    def __init__(self, name: str, config: Dict):
+        """
+        Args:
+            name: Exercise name (e.g., "bicep_curl")
+            config: Exercise configuration (thresholds, errors, etc.)
+        """
+        self.name = name
+        self.config = config
+        
+        self.state = ExerciseState.READY
+        self.rep_count = 0
+        self.current_rep_data = {
+            "rep_number": 0,
+            "peak_angle": 0,
+            "form_score": 100,
+            "errors": [],
+        }
+        self.rep_history = []
+    
+    @abstractmethod
+    def process_frame(self, landmarks, image_width: int, image_height: int) -> Dict:
+        """
+        Process a frame and update rep count / form.
+        
+        Args:
+            landmarks: MediaPipe landmarks
+            image_width: Frame width
+            image_height: Frame height
+            
+        Returns:
+            {
+                "rep_count": int,
+                "state": str,
+                "current_rep": dict,
+                "form_score": int,
+                "errors": [{"type": str, "message": str, "penalty": int}],
+                "angles": dict,
+            }
+        """
+        pass
+    
+    @abstractmethod
+    def detect_exercise(self, landmarks) -> bool:
+        """
+        Detect if landmarks match this exercise pattern.
+        """
+        pass
+    
+    def reset(self):
+        """Reset exercise state."""
+        self.state = ExerciseState.READY
+        self.rep_count = 0
+        self.current_rep_data = {
+            "rep_number": 0,
+            "peak_angle": 0,
+            "form_score": 100,
+            "errors": [],
+        }
+        self.rep_history = []
+    
+    def get_summary(self) -> Dict:
+        """Get exercise summary."""
+        avg_form_score = (
+            sum(r["form_score"] for r in self.rep_history) / len(self.rep_history)
+            if self.rep_history else 0
+        )
+        
+        return {
+            "exercise": self.name,
+            "total_reps": self.rep_count,
+            "avg_form_score": round(avg_form_score, 1),
+            "reps": self.rep_history,
+        }
+```
+
+---
+
+### **6. `exercises/bicep_curl.py`** — Bicep curl FSM
+
+```python
+"""
+Bicep Curl exercise — rep counting and form validation.
+"""
+
+import numpy as np
+from typing import Dict, Optional
+import mediapipe as mp
+from .base import Exercise, ExerciseState
+from angle_calculator import calculate_angle_3d, get_landmark_position, calculate_distance_3d
+from one_euro_filter import OneEuroFilter
+import config
+
+
+class BicepCurl(Exercise):
+    """
+    Bicep Curl rep counter and form validator.
+    
+    FSM:
+    READY (elbow_angle > 160°) → CURLING (elbow_angle < 90°) → READY
+    Each READY→CURLING→READY cycle = 1 rep
+    """
+    
+    def __init__(self):
+        super().__init__("bicep_curl", config.BICEP_CURL)
+        
+        # Smoothing filters
+        self.left_elbow_filter = OneEuroFilter(
+            freq=config.ONE_EURO_FREQ,
+            mincutoff=config.ONE_EURO_MINCUTOFF,
+            beta=config.ONE_EURO_BETA,
+            dcutoff=config.ONE_EURO_DCUTOFF,
+        )
+        self.right_elbow_filter = OneEuroFilter(
+            freq=config.ONE_EURO_FREQ,
+            mincutoff=config.ONE_EURO_MINCUTOFF,
+            beta=config.ONE_EURO_BETA,
+            dcutoff=config.ONE_EURO_DCUTOFF,
+        )
+        
+        # Hysteresis thresholds
+        self.hysteresis_top = 170
+        self.hysteresis_bottom = 85
+    
+    def process_frame(self, landmarks, image_width: int, image_height: int) -> Dict:
+        """
+        Process frame for bicep curl.
+        """
+        mp_pose = mp.solutions.pose
+        
+        # Get key landmarks
+        left_shoulder = np.array([
+            landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].x,
+            landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].y,
+            landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].z,
+        ])
+        left_elbow = np.array([
+            landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].x,
+            landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].y,
+            landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].z,
+        ])
+        left_wrist = np.array([
+            landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].x,
+            landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].y,
+            landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].z,
+        ])
+        
+        right_shoulder = np.array([
+            landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER.value].x,
+            landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER.value].y,
+            landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER.value].z,
+        ])
+        right_elbow = np.array([
+            landmarks[mp_pose.PoseLandmark.RIGHT_ELBOW.value].x,
+            landmarks[mp_pose.PoseLandmark.RIGHT_ELBOW.value].y,
+            landmarks[mp_pose.PoseLandmark.RIGHT_ELBOW.value].z,
+        ])
+        right_wrist = np.array([
+            landmarks[mp_pose.PoseLandmark.RIGHT_WRIST.value].x,
+            landmarks[mp_pose.PoseLandmark.RIGHT_WRIST.value].y,
+            landmarks[mp_pose.PoseLandmark.RIGHT_WRIST.value].z,
+        ])
+        
+        # Calculate elbow angles
+        left_elbow_angle = calculate_angle_3d(left_shoulder, left_elbow, left_wrist)
+        right_elbow_angle = calculate_angle_3d(right_shoulder, right_elbow, right_wrist)
+        
+        # Smooth angles
+        left_elbow_angle = self.left_elbow_filter.filter(left_elbow_angle)
+        right_elbow_angle = self.right_elbow_filter.filter(right_elbow_angle)
+        
+        # Use average of both arms
+        avg_elbow_angle = (left_elbow_angle + right_elbow_angle) / 2
+        
+        # FSM state machine
+        if self.state == ExerciseState.READY:
+            if avg_elbow_angle < self.hysteresis_bottom:
+                self.state = ExerciseState.CURLING
+                self.current_rep_data["rep_number"] = self.rep_count + 1
+                self.current_rep_data["peak_angle"] = avg_elbow_angle
+        
+        elif self.state == ExerciseState.CURLING:
+            self.current_rep_data["peak_angle"] = min(
+                self.current_rep_data["peak_angle"],
+                avg_elbow_angle
+            )
+            
+            if avg_elbow_angle > self.hysteresis_top:
+                self.state = ExerciseState.READY
+                self.rep_count += 1
+                self.current_rep_data["rep_number"] = self.rep_count
+                self.rep_history.append(self.current_rep_data.copy())
+        
+        # Detect form errors
+        errors = self._detect_errors(landmarks, left_shoulder, right_shoulder, left_elbow, right_elbow)
+        form_score = self._calculate_form_score(errors)
+        
+        self.current_rep_data["form_score"] = form_score
+        self.current_rep_data["errors"] = errors
+        
+        return {
+            "rep_count": self.rep_count,
+            "state": self.state.value,
+            "current_rep": self.current_rep_data,
+            "form_score": form_score,
+            "errors": errors,
+            "angles": {
+                "left_elbow": round(left_elbow_angle, 1),
+                "right_elbow": round(right_elbow_angle, 1),
+                "avg_elbow": round(avg_elbow_angle, 1),
+            },
+        }
+    
+    def _detect_errors(self, landmarks, left_shoulder, right_shoulder, left_elbow, right_elbow) -> list:
+        """
+        Detect form errors.
+        """
+        mp_pose = mp.solutions.pose
+        errors = []
+        
+        # Get hip landmarks for torso lean detection
+        left_hip = np.array([
+            landmarks[mp_pose.PoseLandmark.LEFT_HIP.value].x,
+            landmarks[mp_pose.PoseLandmark.LEFT_HIP.value].y,
+            landmarks[mp_pose.PoseLandmark.LEFT_HIP.value].z,
+        ])
+        right_hip = np.array([
+            landmarks[mp_pose.PoseLandmark.RIGHT_HIP.value].x,
+            landmarks[mp_pose.PoseLandmark.RIGHT_HIP.value].y,
+            landmarks[mp_pose.PoseLandmark.RIGHT_HIP.value].z,
+        ])
+        
+        # Error 1: Lean back (shoulder angle)
+        shoulder_angle = calculate_angle_3d(left_shoulder, left_hip, left_elbow)
+        if shoulder_angle > self.config["errors"]["lean_back"]["threshold"]:
+            errors.append({
+                "type": "lean_back",
+                "confidence": 0.85,
+                "penalty": self.config["errors"]["lean_back"]["penalty"],
+                "message": self.config["errors"]["lean_back"]["message"],
+            })
+        
+        # Error 2: Elbow flare (lateral movement)
+        left_elbow_x = left_elbow[0]
+        left_shoulder_x = left_shoulder[0]
+        elbow_flare = abs(left_elbow_x - left_shoulder_x) * 100  # Convert to cm
+        if elbow_flare > self.config["errors"]["elbow_flare"]["threshold"]:
+            errors.append({
+                "type": "elbow_flare",
+                "confidence": 0.80,
+                "penalty": self.config["errors"]["elbow_flare"]["penalty"],
+                "message": self.config["errors"]["elbow_flare"]["message"],
+            })
+        
+        return errors
+    
+    def _calculate_form_score(self, errors: list) -> int:
+        """
+        Calculate form score based on errors.
+        """
+        score = config.FORM_SCORE_BASE
+        for error in errors:
+            score -= error["penalty"]
+        
+        return max(config.FORM_SCORE_MIN, min(config.FORM_SCORE_MAX, score))
+    
+    def detect_exercise(self, landmarks) -> bool:
+        """
+        Detect if this is a bicep curl based on motion pattern.
+        """
+        # Simplified: check if elbow angles are in expected range
+        mp_pose = mp.solutions.pose
+        
+        left_shoulder = np.array([
+            landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].x,
+            landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].y,
+            landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].z,
+        ])
+        left_elbow = np.array([
+            landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].x,
+            landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].y,
+            landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].z,
+        ])
+        left_wrist = np.array([
+            landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].x,
+            landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].y,
+            landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].z,
+        ])
+        
+        elbow_angle = calculate_angle_3d(left_shoulder, left_elbow, left_wrist)
+        
+        # Bicep curl: elbow angle should be between 40-170 degrees
+        return 40 < elbow_angle < 170
+```
+
+---
+
+### **7. `exercises/lat_pulldown.py`** — Lat pulldown FSM
+
+```python
+"""
+Lat Pulldown exercise — rep counting and form validation.
+"""
+
+import numpy as np
+from typing import Dict
+import mediapipe as mp
+from .base import Exercise, ExerciseState
+from angle_calculator import calculate_angle_3d
+from one_euro_filter import OneEuroFilter
+import config
+
+
+class LatPulldown(Exercise):
+    """
+    Lat Pulldown rep counter and form validator.
+    
+    FSM:
+    READY (elbow_angle > 140°) → PULLING (elbow_angle < 100°) → READY
+    Each READY→PULLING→READY cycle = 1 rep
+    """
+    
+    def __init__(self):
+        super().__init__("lat_pulldown", config.LAT_PULLDOWN)
+        
+        # Smoothing filters
+        self.left_elbow_filter = OneEuroFilter(
+            freq=config.ONE_EURO_FREQ,
+            mincutoff=config.ONE_EURO_MINCUTOFF,
+            beta=config.ONE_EURO_BETA,
+            dcutoff=config.ONE_EURO_DCUTOFF,
+        )
+        self.right_elbow_filter = OneEuroFilter(
+            freq=config.ONE_EURO_FREQ,
+            mincutoff=config.ONE_EURO_MINCUTOFF,
+            beta=config.ONE_EURO_BETA,
+            dcutoff=config.ONE_EURO_DCUTOFF,
+        )
+        
+        # Hysteresis thresholds
+        self.hysteresis_top = 145
+        self.hysteresis_bottom = 95
+    
+    def process_frame(self, landmarks, image_width: int, image_height: int) -> Dict:
+        """
+        Process frame for lat pulldown.
+        """
+        mp_pose = mp.solutions.pose
+        
+        # Get key landmarks
+        left_shoulder = np.array([
+            landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].x,
+            landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].y,
+            landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].z,
+        ])
+        left_elbow = np.array([
+            landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].x,
+            landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].y,
+            landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].z,
+        ])
+        left_wrist = np.array([
+            landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].x,
+            landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].y,
+            landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].z,
+        ])
+        
+        right_shoulder = np.array([
+            landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER.value].x,
+            landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER.value].y,
+            landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER.value].z,
+        ])
+        right_elbow = np.array([
+            landmarks[mp_pose.PoseLandmark.RIGHT_ELBOW.value].x,
+            landmarks[mp_pose.PoseLandmark.RIGHT_ELBOW.

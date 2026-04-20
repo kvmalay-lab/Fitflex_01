@@ -3,16 +3,25 @@ from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import asyncio
+import os
 from mediapipe_engine import FitFlexEngine
 
 app = FastAPI()
 
+allowed_origins = [
+    "http://localhost:5000",
+    "http://0.0.0.0:5000",
+]
+replit_domain = os.environ.get("REPLIT_DEV_DOMAIN")
+if replit_domain:
+    allowed_origins.append(f"https://{replit_domain}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
 )
 
 active_sessions = {}
@@ -65,7 +74,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         while engine.running:
             stats = engine.get_stats()
             await websocket.send_json(stats)
-            await asyncio.sleep(0.03) # 30 FPS updates
+            await asyncio.sleep(0.03)
     except WebSocketDisconnect:
         pass
 

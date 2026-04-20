@@ -21,14 +21,10 @@ export function useWorkoutTracking(exerciseType: string) {
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
 
-  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
-
   useEffect(() => {
     let ws: WebSocket | null = null;
     let isMounted = true;
 
-    // We simulate the backend connection here so the UI works smoothly
-    // even if the user hasn't booted up the Python server yet.
     setIsLoading(true);
 
     const initSimulation = () => {
@@ -36,7 +32,6 @@ export function useWorkoutTracking(exerciseType: string) {
       setIsLoading(false);
       setSessionId("sim_session_123");
 
-      // Mock WebSocket stream behavior (30fps)
       let angle = 0;
       let angleDir = 1;
       let reps = 0;
@@ -67,8 +62,7 @@ export function useWorkoutTracking(exerciseType: string) {
       ws = { close: () => clearInterval(interval) } as any;
     };
 
-    // Attempt real connection, fallback to mock if no backend is running
-    fetch(`${BACKEND_URL}/api/session/start`, {
+    fetch('/api/session/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: 'test_user', exercise_type: exerciseType })
@@ -79,9 +73,8 @@ export function useWorkoutTracking(exerciseType: string) {
        setSessionId(data.session_id);
        setIsLoading(false);
 
-       // Setup websocket
-       const wsUrl = BACKEND_URL.replace('http', 'ws');
-       ws = new WebSocket(`${wsUrl}/ws/session/${data.session_id}`);
+       const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+       ws = new WebSocket(`${wsProtocol}//${window.location.host}/ws/session/${data.session_id}`);
        ws.onmessage = (event) => {
          const newStats = JSON.parse(event.data);
          setStats(newStats);
@@ -100,7 +93,7 @@ export function useWorkoutTracking(exerciseType: string) {
       isMounted = false;
       if (ws) ws.close();
       if (sessionId) {
-        fetch(`${BACKEND_URL}/api/session/${sessionId}/stop`, { method: 'POST' }).catch(() => {});
+        fetch(`/api/session/${sessionId}/stop`, { method: 'POST' }).catch(() => {});
       }
     };
   }, [exerciseType]);
@@ -109,6 +102,6 @@ export function useWorkoutTracking(exerciseType: string) {
     stats, 
     isLoading, 
     error,
-    frameUrl: sessionId && !sessionId.startsWith('sim_') ? `${BACKEND_URL}/api/session/${sessionId}/frame` : 'https://images.unsplash.com/photo-1581009146145-b5ef050c2e1e?q=80&w=2070&auto=format&fit=crop'
+    frameUrl: sessionId && !sessionId.startsWith('sim_') ? `/api/session/${sessionId}/frame` : 'https://images.unsplash.com/photo-1581009146145-b5ef050c2e1e?q=80&w=2070&auto=format&fit=crop'
   };
 }
