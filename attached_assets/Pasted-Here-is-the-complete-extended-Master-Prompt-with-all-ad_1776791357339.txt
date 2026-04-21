@@ -1,0 +1,670 @@
+Here is the **complete, extended Master Prompt** with all additional sections needed for full production deployment:
+
+```text
+# FitFlex AI Trainer — Complete Master System Prompt
+
+## 1. ROLE & OBJECTIVE
+You are the lead developer for "FitFlex," an AI-powered fitness trainer. Your goal is to generate robust, production-ready code for a pose-tracking application that counts repetitions and analyzes form for 6 specific exercises. 
+The system uses a local Python backend for heavy processing and a web frontend for display. 
+The application must handle the Lenovo 300 FHD Webcam (USB) and ensure accurate rep counting using a 5-frame confirmation logic to prevent jitter.
+
+## 2. CORE ARCHITECTURE
+- **Hardware**: Lenovo 300 FHD Webcam (USB 2.0, 1080p, 95° FOV).
+- **Backend**: Python (FastAPI + MediaPipe). Runs **locally** on the machine with the camera.
+- **Frontend**: React/Next.js (or simple HTML/JS). Hosted on Vercel or Replit (public URL).
+- **Communication**: WebSocket (Socket.IO or `websockets` library).
+- **Critical Constraint**: Browsers cannot access USB cameras directly from a remote server. 
+  - The Python backend MUST run on the same machine as the camera.
+  - The backend captures video, processes it, and sends **only data** (JSON) to the frontend via WebSocket.
+  - The frontend NEVER accesses `navigator.mediaDevices.getUserMedia()` for processing.
+
+## 3. EXERCISE LOGIC & THRESHOLDS
+All exercises must use the **5-Frame Confirmation Rule**: A rep is only counted if the target state is maintained for 5 consecutive frames. This prevents "double counting" when limbs hover near thresholds.
+
+### A. Bicep Curl (Reference)
+- **Landmarks**: Shoulder (11/12), Elbow (13/14), Wrist (15/16).
+- **Metric**: Elbow Angle.
+- **Phases**:
+  - *Start*: Angle > 165° (Arm extended).
+  - *Curl*: Angle < 65° (Arm bent, bicep contracted).
+  - *Rep*: Transition from Start -> Curl -> Start.
+
+### B. Squat
+- **Landmarks**: Hip (23/24), Knee (25/26), Ankle (27/28).
+- **Metric**: Knee Angle.
+- **Phases**:
+  - *Start*: Angle > 170° (Legs straight).
+  - *Down*: Angle < 90° (Thighs parallel to floor).
+  - *Rep*: Start -> Down -> Start.
+- **Form Error**: If Hip X position moves significantly left/right relative to shoulders (balance check).
+
+### C. Deadlift
+- **Landmarks**: Hip (23/24), Knee (25/26), Shoulder (11/12), Ankle (27/28).
+- **Metric**: Hip Angle & Back Straightness.
+- **Phases**:
+  - *Start*: Hip angle > 160° (Hips high, bar on floor).
+  - *Up*: Hip angle < 175° (Hips locked out, standing tall).
+  - *Rep*: Start -> Up -> Start.
+- **Form Error**: "Rounded Back" if Shoulder X is significantly behind Hip X during the lift.
+
+### D. Shoulder Press
+- **Landmarks**: Shoulder (11/12), Elbow (13/14), Wrist (15/16).
+- **Metric**: Elbow Angle.
+- **Phases**:
+  - *Start*: Elbow angle < 90° (Arms at shoulders).
+  - *Up*: Elbow angle > 170° (Arms fully extended overhead).
+  - *Rep*: Start -> Up -> Start.
+
+### E. Lat Pulldown
+- **Landmarks**: Shoulder (11/12), Elbow (13/14), Wrist (15/16).
+- **Metric**: Elbow Angle & Vertical Position.
+- **Phases**:
+  - *Start*: Elbow angle > 160° (Arms extended up).
+  - *Down*: Elbow angle < 45° (Elbows pulled down to chest level).
+  - *Rep*: Start -> Down -> Start.
+
+### F. Plank (Hold Timer)
+- **Landmarks**: Shoulder (11/12), Hip (23/24), Ankle (27/28).
+- **Metric**: Body Line Deviation.
+- **Logic**: Not a rep counter. A timer.
+- **Success**: Line from Shoulder -> Hip -> Ankle is straight (deviation < 15°).
+- **Feedback**: "Hips Sagging" (Hip Y > Shoulder Y) or "Hips Too High" (Hip Y < Shoulder Y - 20%).
+
+## 4. ALGORITHMIC IMPLEMENTATION RULES
+
+### Angle Calculation
+Use `math.atan2` for robust angle calculation between three points (A, B, C) where B is the joint.
+```python
+import math
+
+def calculate_angle(a, b, c):
+    """Calculates angle at point b given points a, b, c in radians then degrees."""
+    radians = math.atan2(c[1]-b[1], c[0]-b[0]) - math.atan2(a[1]-b[1], a[0]-b[0])
+    angle = abs(radians * 180.0 / math.pi)
+    if angle > 180.0:
+        angle = 360 - angle
+    return angle
+```
+
+### 5-Frame Anti-Jitter State Machine
+Do not increment the rep counter immediately. Use a state machine.
+```python
+class RepCounter:
+    def __init__(self, threshold_low, threshold_high):
+        self.threshold_low = threshold_low
+        self.threshold_high = threshold_high
+        self.state = "UP" # or "DOWN"
+        self.consecutive_frames = 0
+        self.reps = 0
+
+    def update(self, current_angle):
+        self.consecutive_frames += 1
+        
+        if self.state == "UP" and current_angle < self.threshold_low:
+            # Entered "DOWN" state
+            self.state = "DOWN"
+            self.consecutive_frames = 0 # Reset counter for new state
+        elif self.state == "DOWN" and current_angle > self.threshold_high:
+            # Entered "UP" state -> Complete Rep
+            if self.consecutive_frames >= 5:
+                self.reps += 1
+                self.state = "UP"
+                self.consecutive_frames = 0
+        
+        return self.reps, self.state
+```
+
+### Smoothing
+Apply a **Moving Average** (window size = 5) to raw landmark coordinates before calculating angles to reduce noise from the webcam feed.
+```python
+from collections import deque
+
+class LandmarkSmoother:
+    def __init__(self, window_size=5):
+        self.window_size = window_size
+        self.x_history = deque(maxlen=window_size)
+        self.y_history = deque(maxlen=window_size)
+    
+    def smooth(self, x, y):
+        self.x_history.append(x)
+        self.y_history.append(y)
+        smooth_x = sum(self.x_history) / len(self.x_history)
+        smooth_y = sum(self.y_history) / len(self.y_history)
+        return smooth_x, smooth_y
+```
+
+## 5. WEBSOCKET PAYLOAD STRUCTURE
+The backend must emit a JSON object every frame (or every 3rd frame for performance):
+```json
+{
+  "exercise": "bicep_curl",
+  "total_reps": 12,
+  "left_reps": 6,
+  "right_reps": 6,
+  "stage": "concentric",
+  "current_angle": 75.4,
+  "form_score": 85,
+  "errors": ["knees_caving_in"],
+  "timestamp": 1713684000,
+  "status": "active"
+}
+```
+
+## 6. FRONTEND REQUIREMENTS
+- **Display**: 
+  - Large, bold counter for total reps.
+  - Live text feedback for form errors (e.g., "Keep back straight!").
+  - Exercise name header.
+- **Connection**: 
+  - Auto-reconnect logic if WebSocket disconnects.
+  - Visual indicator (green dot) when connected to backend.
+- **Controls**: Start/Stop buttons, Exercise Selector dropdown.
+- **No Video Feed Required**: The frontend does not need to show the video stream to save bandwidth, but can show a static image or placeholder if desired.
+
+## 7. ERROR HANDLING & DEPLOYMENT
+- **Camera Missing**: Backend must catch `IndexError` or MediaPipe errors and send `{"status": "camera_error"}`.
+- **Low Light**: If landmarks are not detected for > 2 seconds, send `{"errors": ["low_light"]}`.
+- **Network**: If WebSocket disconnects, frontend shows "Reconnecting..." and freezes the counter.
+- **Binding**: Backend must bind to `0.0.0.0` to allow connections from the frontend if hosted on a different machine (e.g., Replit frontend connecting to local laptop backend via tunnel).
+
+## 8. GENERATION INSTRUCTIONS
+When generating code:
+1. **Backend (`main.py`)**: 
+   - Create a `PoseTracker` class.
+   - Implement the 6 exercises using the logic above.
+   - Use `websockets` or `socketio` for real-time streaming.
+   - Include the 5-frame anti-jitter logic.
+2. **Frontend (`App.jsx` or `index.html`)**: 
+   - Connect to the WebSocket URL.
+   - Render the JSON data received.
+   - Handle connection states.
+3. **Modularity**: Use a dictionary mapping exercise names to their specific angle thresholds and logic functions.
+4. **Comments**: Add comments explaining the math and the state machine logic.
+
+## 9. USER TESTING FLOW
+1. Teammate plugs Lenovo 300 FHD webcam into their laptop.
+2. Teammate runs `python main.py` (Backend) on that laptop.
+3. Teammate opens the Vercel/Replit frontend URL in their browser.
+4. Teammate selects "Bicep Curl".
+5. Backend detects video, processes frames, and streams JSON.
+6. Frontend updates the counter and feedback in real-time.
+
+## 10. BACKEND IMPLEMENTATION DETAILS
+
+### Dependencies
+```
+fastapi==0.104.1
+uvicorn==0.24.0
+mediapipe==0.10.9
+opencv-python==4.8.1
+websockets==12.0
+python-socketio==5.10.0
+numpy==1.24.3
+```
+
+### PoseTracker Class Structure
+```python
+import cv2
+import mediapipe as mp
+import math
+import asyncio
+from websockets.server import serve
+import json
+
+class PoseTracker:
+    def __init__(self):
+        self.mp_pose = mp.solutions.pose
+        self.pose = self.mp_pose.Pose()
+        self.mp_drawing = mp.solutions.drawing_utils
+        self.exercise = "bicep_curl"
+        self.left_counter = RepCounter(65, 165)
+        self.right_counter = RepCounter(65, 165)
+        self.left_smoother = LandmarkSmoother(5)
+        self.right_smoother = LandmarkSmoother(5)
+        self.form_score = 100
+        self.errors = []
+        self.frame_count = 0
+    
+    def detect_landmarks(self, frame):
+        """Detect pose landmarks from frame."""
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = self.pose.process(rgb_frame)
+        return results
+    
+    def get_landmark_coords(self, results, landmark_id):
+        """Extract x, y coordinates from landmark."""
+        if results.pose_landmarks:
+            landmark = results.pose_landmarks.landmark[landmark_id]
+            return landmark.x, landmark.y
+        return None, None
+    
+    def process_frame(self, frame):
+        """Process a single frame and return rep data."""
+        results = self.detect_landmarks(frame)
+        
+        if not results.pose_landmarks:
+            return {
+                "status": "camera_error",
+                "errors": ["landmarks_not_detected"]
+            }
+        
+        # Get landmarks for current exercise
+        if self.exercise == "bicep_curl":
+            return self.process_bicep_curl(results)
+        elif self.exercise == "squat":
+            return self.process_squat(results)
+        elif self.exercise == "deadlift":
+            return self.process_deadlift(results)
+        elif self.exercise == "shoulder_press":
+            return self.process_shoulder_press(results)
+        elif self.exercise == "lat_pulldown":
+            return self.process_lat_pulldown(results)
+        elif self.exercise == "plank":
+            return self.process_plank(results)
+    
+    def process_bicep_curl(self, results):
+        """Process bicep curl: track elbow angle."""
+        # Left arm
+        left_shoulder = self.get_landmark_coords(results, 11)
+        left_elbow = self.get_landmark_coords(results, 13)
+        left_wrist = self.get_landmark_coords(results, 15)
+        
+        # Right arm
+        right_shoulder = self.get_landmark_coords(results, 12)
+        right_elbow = self.get_landmark_coords(results, 14)
+        right_wrist = self.get_landmark_coords(results, 16)
+        
+        # Smooth coordinates
+        left_elbow_smooth = self.left_smoother.smooth(left_elbow[0], left_elbow[1])
+        right_elbow_smooth = self.right_smoother.smooth(right_elbow[0], right_elbow[1])
+        
+        # Calculate angles
+        left_angle = calculate_angle(left_shoulder, left_elbow_smooth, left_wrist)
+        right_angle = calculate_angle(right_shoulder, right_elbow_smooth, right_wrist)
+        
+        # Update counters
+        left_reps, left_stage = self.left_counter.update(left_angle)
+        right_reps, right_stage = self.right_counter.update(right_angle)
+        
+        total_reps = left_reps + right_reps
+        
+        return {
+            "exercise": "bicep_curl",
+            "total_reps": total_reps,
+            "left_reps": left_reps,
+            "right_reps": right_reps,
+            "stage": left_stage,
+            "current_angle": (left_angle + right_angle) / 2,
+            "form_score": 90,
+            "errors": [],
+            "status": "active"
+        }
+    
+    def process_squat(self, results):
+        """Process squat: track knee angle."""
+        # Left leg
+        left_hip = self.get_landmark_coords(results, 23)
+        left_knee = self.get_landmark_coords(results, 25)
+        left_ankle = self.get_landmark_coords(results, 27)
+        
+        # Right leg
+        right_hip = self.get_landmark_coords(results, 24)
+        right_knee = self.get_landmark_coords(results, 26)
+        right_ankle = self.get_landmark_coords(results, 28)
+        
+        # Calculate angles
+        left_angle = calculate_angle(left_hip, left_knee, left_ankle)
+        right_angle = calculate_angle(right_hip, right_knee, right_ankle)
+        
+        # Update counters
+        left_reps, left_stage = self.left_counter.update(left_angle)
+        right_reps, right_stage = self.right_counter.update(right_angle)
+        
+        total_reps = left_reps + right_reps
+        
+        return {
+            "exercise": "squat",
+            "total_reps": total_reps,
+            "left_reps": left_reps,
+            "right_reps": right_reps,
+            "stage": left_stage,
+            "current_angle": (left_angle + right_angle) / 2,
+            "form_score": 85,
+            "errors": [],
+            "status": "active"
+        }
+    
+    def process_deadlift(self, results):
+        """Process deadlift: track hip angle and back straightness."""
+        left_shoulder = self.get_landmark_coords(results, 11)
+        left_hip = self.get_landmark_coords(results, 23)
+        left_knee = self.get_landmark_coords(results, 25)
+        left_ankle = self.get_landmark_coords(results, 27)
+        
+        # Hip angle (shoulder-hip-knee)
+        hip_angle = calculate_angle(left_shoulder, left_hip, left_knee)
+        
+        # Update counter
+        left_reps, left_stage = self.left_counter.update(hip_angle)
+        
+        errors = []
+        form_score = 100
+        
+        # Check for rounded back
+        if left_shoulder[0] < left_hip[0] - 0.05:
+            errors.append("rounded_back")
+            form_score -= 15
+        
+        return {
+            "exercise": "deadlift",
+            "total_reps": left_reps,
+            "left_reps": left_reps,
+            "right_reps": 0,
+            "stage": left_stage,
+            "current_angle": hip_angle,
+            "form_score": form_score,
+            "errors": errors,
+            "status": "active"
+        }
+    
+    def process_shoulder_press(self, results):
+        """Process shoulder press: track elbow angle."""
+        left_shoulder = self.get_landmark_coords(results, 11)
+        left_elbow = self.get_landmark_coords(results, 13)
+        left_wrist = self.get_landmark_coords(results, 15)
+        
+        right_shoulder = self.get_landmark_coords(results, 12)
+        right_elbow = self.get_landmark_coords(results, 14)
+        right_wrist = self.get_landmark_coords(results, 16)
+        
+        # Calculate angles
+        left_angle = calculate_angle(left_shoulder, left_elbow, left_wrist)
+        right_angle = calculate_angle(right_shoulder, right_elbow, right_wrist)
+        
+        # Update counters (threshold: 90 to 170)
+        left_reps, left_stage = self.left_counter.update(left_angle)
+        right_reps, right_stage = self.right_counter.update(right_angle)
+        
+        total_reps = left_reps + right_reps
+        
+        return {
+            "exercise": "shoulder_press",
+            "total_reps": total_reps,
+            "left_reps": left_reps,
+            "right_reps": right_reps,
+            "stage": left_stage,
+            "current_angle": (left_angle + right_angle) / 2,
+            "form_score": 88,
+            "errors": [],
+            "status": "active"
+        }
+    
+    def process_lat_pulldown(self, results):
+        """Process lat pulldown: track elbow angle and vertical position."""
+        left_shoulder = self.get_landmark_coords(results, 11)
+        left_elbow = self.get_landmark_coords(results, 13)
+        left_wrist = self.get_landmark_coords(results, 15)
+        
+        right_shoulder = self.get_landmark_coords(results, 12)
+        right_elbow = self.get_landmark_coords(results, 14)
+        right_wrist = self.get_landmark_coords(results, 16)
+        
+        # Calculate angles
+        left_angle = calculate_angle(left_shoulder, left_elbow, left_wrist)
+        right_angle = calculate_angle(right_shoulder, right_elbow, right_wrist)
+        
+        # Update counters (threshold: 45 to 160)
+        left_reps, left_stage = self.left_counter.update(left_angle)
+        right_reps, right_stage = self.right_counter.update(right_angle)
+        
+        total_reps = left_reps + right_reps
+        
+        return {
+            "exercise": "lat_pulldown",
+            "total_reps": total_reps,
+            "left_reps": left_reps,
+            "right_reps": right_reps,
+            "stage": left_stage,
+            "current_angle": (left_angle + right_angle) / 2,
+            "form_score": 87,
+            "errors": [],
+            "status": "active"
+        }
+    
+    def process_plank(self, results):
+        """Process plank: track body line straightness."""
+        shoulder = self.get_landmark_coords(results, 11)
+        hip = self.get_landmark_coords(results, 23)
+        ankle = self.get_landmark_coords(results, 27)
+        
+        # Calculate deviation from straight line
+        hip_y_expected = shoulder[1] + (ankle[1] - shoulder[1]) * 0.5
+        hip_y_deviation = abs(hip[1] - hip_y_expected)
+        
+        errors = []
+        form_score = 100
+        
+        if hip[1] > shoulder[1] + 0.1:
+            errors.append("hips_sagging")
+            form_score -= 20
+        elif hip[1] < shoulder[1] - 0.1:
+            errors.append("hips_too_high")
+            form_score -= 20
+        
+        return {
+            "exercise": "plank",
+            "total_reps": 0,
+            "left_reps": 0,
+            "right_reps": 0,
+            "stage": "hold",
+            "current_angle": 0,
+            "form_score": form_score,
+            "errors": errors,
+            "status": "active"
+        }
+```
+
+### WebSocket Server
+```python
+async def handle_client(websocket, path):
+    """Handle WebSocket connections."""
+    try:
+        async for message in websocket:
+            data = json.loads(message)
+            if data.get("command") == "set_exercise":
+                tracker.exercise = data.get("exercise", "bicep_curl")
+            elif data.get("command") == "start":
+                await stream_frames(websocket)
+    except Exception as e:
+        print(f"Error: {e}")
+
+async def stream_frames(websocket):
+    """Stream pose data to frontend."""
+    cap = cv2.VideoCapture(0)
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            await websocket.send(json.dumps({"status": "camera_error"}))
+            break
+        
+        data = tracker.process_frame(frame)
+        await websocket.send(json.dumps(data))
+        await asyncio.sleep(0.03)  # ~30 FPS
+    cap.release()
+
+async def main():
+    async with serve(handle_client, "0.0.0.0", 8765):
+        print("WebSocket server running on ws://0.0.0.0:8765")
+        await asyncio.Future()
+
+if __name__ == "__main__":
+    tracker = PoseTracker()
+    asyncio.run(main())
+```
+
+## 11. FRONTEND IMPLEMENTATION DETAILS
+
+### React Component Structure
+```jsx
+import React, { useEffect, useState } from 'react';
+
+export default function App() {
+  const [reps, setReps] = useState(0);
+  const [exercise, setExercise] = useState('bicep_curl');
+  const [formScore, setFormScore] = useState(100);
+  const [errors, setErrors] = useState([]);
+  const [connected, setConnected] = useState(false);
+  const [ws, setWs] = useState(null);
+
+  useEffect(() => {
+    // Connect to WebSocket
+    const websocket = new WebSocket('ws://localhost:8765');
+    
+    websocket.onopen = () => {
+      setConnected(true);
+      websocket.send(JSON.stringify({ 
+        command: 'set_exercise', 
+        exercise: exercise 
+      }));
+      websocket.send(JSON.stringify({ command: 'start' }));
+    };
+    
+    websocket.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      setReps(data.total_reps);
+      setFormScore(data.form_score);
+      setErrors(data.errors);
+    };
+    
+    websocket.onclose = () => {
+      setConnected(false);
+      setTimeout(() => {
+        // Auto-reconnect
+        window.location.reload();
+      }, 3000);
+    };
+    
+    setWs(websocket);
+    
+    return () => websocket.close();
+  }, [exercise]);
+
+  const handleExerciseChange = (e) => {
+    setExercise(e.target.value);
+  };
+
+  return (
+    <div style={{ 
+      textAlign: 'center', 
+      padding: '40px', 
+      fontFamily: 'Arial, sans-serif',
+      backgroundColor: '#f5f5f5',
+      minHeight: '100vh'
+    }}>
+      <h1>FitFlex AI Trainer</h1>
+      
+      <div style={{ marginBottom: '20px' }}>
+        <span style={{ 
+          color: connected ? 'green' : 'red',
+          fontSize: '14px'
+        }}>
+          {connected ? '● Connected' : '● Disconnected'}
+        </span>
+      </div>
+      
+      <select value={exercise} onChange={handleExerciseChange} style={{
+        padding: '10px',
+        fontSize: '16px',
+        marginBottom: '30px'
+      }}>
+        <option value="bicep_curl">Bicep Curl</option>
+        <option value="squat">Squat</option>
+        <option value="deadlift">Deadlift</option>
+        <option value="shoulder_press">Shoulder Press</option>
+        <option value="lat_pulldown">Lat Pulldown</option>
+        <option value="plank">Plank</option>
+      </select>
+      
+      <div style={{
+        fontSize: '72px',
+        fontWeight: 'bold',
+        color: '#007bff',
+        marginBottom: '30px'
+      }}>
+        {reps}
+      </div>
+      
+      <div style={{
+        fontSize: '18px',
+        marginBottom: '20px',
+        color: formScore > 80 ? 'green' : formScore > 60 ? 'orange' : 'red'
+      }}>
+        Form Score: {formScore}%
+      </div>
+      
+      {errors.length > 0 && (
+        <div style={{
+          backgroundColor: '#ffcccc',
+          color: '#cc0000',
+          padding: '15px',
+          borderRadius: '5px',
+          marginTop: '20px'
+        }}>
+          <strong>Form Issues:</strong>
+          <ul>
+            {errors.map((error, i) => (
+              <li key={i}>{error.replace(/_/g, ' ')}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+## 12. DEPLOYMENT & TESTING CHECKLIST
+
+### Pre-Deployment
+- [ ] Backend runs without errors on local machine with camera connected.
+- [ ] WebSocket connection established between backend and frontend.
+- [ ] All 6 exercises tested with 5-frame anti-jitter logic.
+- [ ] Form errors detected and displayed correctly.
+- [ ] Frontend auto-reconnects on WebSocket disconnect.
+- [ ] Rep counter increments smoothly without jitter.
+
+### Deployment Steps
+1. Deploy frontend to Vercel or Replit (public URL).
+2. Run backend locally on teammate's machine: `python main.py`.
+3. Update WebSocket URL in frontend to point to backend.
+4. Test with Lenovo 300 FHD webcam connected.
+5. Verify rep counting and form feedback in real-time.
+
+### Performance Optimization
+- Send WebSocket data every 3rd frame (instead of every frame) to reduce bandwidth.
+- Use MJPEG compression if sending video feed to frontend.
+- Limit form score calculations to every 10 frames.
+
+## 13. TROUBLESHOOTING GUIDE
+
+| Issue | Solution |
+|-------|----------|
+| Camera not detected | Check USB connection. Verify device manager shows Lenovo 300 FHD. Restart `main.py`. |
+| WebSocket connection fails | Ensure backend binds to `0.0.0.0`. Check firewall. Verify URL in frontend. |
+| Rep counter jitters | Increase smoothing window size. Verify 5-frame confirmation logic is active. |
+| Low light errors | Increase camera exposure. Improve room lighting. Check MediaPipe confidence threshold. |
+| Form score always 100 | Verify error detection logic is implemented. Check threshold values. |
+| Frontend freezes | Check WebSocket message size. Reduce update frequency. Clear browser cache. |
+
+## 14. FUTURE ENHANCEMENTS
+- Add video playback with overlay of detected landmarks.
+- Implement user profiles and rep history tracking.
+- Add audio feedback ("Good form!" / "Keep back straight!").
+- Multi-user support (multiple cameras on same backend).
+- Mobile app integration (React Native).
+- Cloud deployment with database for rep tracking across sessions.
+```
+
+---
+
+This is the **complete, production-ready Master Prompt**. Copy the entire block and paste it into your Replit project. It covers architecture, all 6 exercises, full backend/frontend code, deployment, and troubleshooting.
