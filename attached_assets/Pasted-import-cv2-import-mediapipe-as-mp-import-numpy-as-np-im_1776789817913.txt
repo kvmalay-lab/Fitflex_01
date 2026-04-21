@@ -1,0 +1,361 @@
+import cv2
+import mediapipe as mp
+import numpy as np
+import pickle
+import os
+# ====================REP COUNTER CODE ====================
+def calculate_angle(a,b,c):
+    a=np.array (a)   #shoulder
+    b=np.array (b)   #elbow
+    c=np.array (c)   #wrist          
+
+    ## Calculate the angle between two vectors using arctan2
+    radians= np.arctan2(c[1]-b[1], c[0]-b[0]) - np.arctan2(a[1]-b[1], a[0]-b[0])  
+    angle=np.abs(radians*180.0/np.pi)          
+    
+    # Vector1 = elbow → wrist
+    # Vector2 = elbow → shoulder
+    # arctan2 gives the vector direction
+    # Subtracting the two gives the angle between them
+    
+    if angle > 180:
+        angle=360-angle
+
+    return angle
+
+# ==================== FACE RECOGNITION SETUP ====================
+mp_face_mesh = mp.solutions.face_mesh
+USERS_FILE = "users.pkl"
+
+face_mesh = mp_face_mesh.FaceMesh(
+    static_image_mode=False,
+    max_num_faces=1,
+    min_detection_confidence=0.5,
+    min_tracking_confidence=0.5
+)
+
+def extract_face_embedding(landmarks):
+    p = np.array([[lm.x, lm.y, lm.z] for lm in landmarks])
+    p -= np.mean(p, axis=0)
+    p /= np.std(p, axis=0) + 1e-8
+    return p.flatten()
+
+def load_users():
+    if os.path.exists(USERS_FILE):
+        with open(USERS_FILE, "rb") as f:
+            return pickle.load(f)
+    return {}
+
+def save_users(users):
+    with open(USERS_FILE, "wb") as f:
+        pickle.dump(users, f)
+
+def signup_user(name):
+    users = load_users()
+    
+    if name in users:
+        print(f"\n❌ User '{name}' already exists!")
+        return None
+    
+    cap = cv2.VideoCapture(1)
+    embeddings = []
+    count = 0
+    
+    print(f"\n📸 Capturing face for '{name}'... Look at the camera!")
+    
+    while count < 10:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        
+        frame = cv2.flip(frame, 1)
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = face_mesh.process(rgb)
+        
+        if results.multi_face_landmarks:
+            for face_lms in results.multi_face_landmarks:
+                emb = extract_face_embedding(face_lms.landmark)
+                embeddings.append(emb)
+                count += 1
+                
+                cv2.putText(frame, f"Capturing: {count}/10", (50, 50),
+                           cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 3)
+                break
+        else:
+            cv2.putText(frame, "No face detected!", (50, 50),
+                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        
+        cv2.imshow('FitFlex - Sign Up', frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+    
+    cap.release()
+    cv2.destroyAllWindows()
+    
+    if embeddings:
+        mean_embedding = np.mean(embeddings, axis=0)
+        users[name] = mean_embedding
+        save_users(users)
+        print(f"\n✅ User '{name}' registered successfully!")
+        return name
+    else:
+        print("\n❌ No valid face captured")
+        return None
+
+def signin_user():
+    users = load_users()
+    
+    if not users:
+        print("\n❌ No users registered! Please sign up first.")
+        return None
+    
+    known_names = list(users.keys())
+    known_embeddings = list(users.values())
+    
+    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+    recognized = False
+    recognized_name = None
+    
+    print("\n👀 Looking for your face... (Press 'q' to cancel)")
+    
+    for i in range(30):
+        ret, frame = cap.read()
+        if not ret:
+            continue
+        
+        frame = cv2.flip(frame, 1)
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = face_mesh.process(rgb)
+        
+        if results.multi_face_landmarks:
+            for face_lms in results.multi_face_landmarks:
+                current_emb = extract_face_embedding(face_lms.landmark)
+                distances = [np.linalg.norm(current_emb - enc) for enc in known_embeddings]
+                min_idx = np.argmin(distances)
+                
+                if distances[min_idx] < 0.6:
+                    recognized_name = known_names[min_idx]
+                    recognized = True
+                    
+                    cv2.putText(frame, f"Welcome {recognized_name}!", (50, 50),
+                               cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
+                    break
+                else:
+                    cv2.putText(frame, "Unknown face", (50, 50),
+                               cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        
+        cv2.imshow('FitFlex - Sign In', frame)
+        if recognized or (cv2.waitKey(1) & 0xFF == ord('q')):
+            break
+    
+    cap.release()
+    cv2.destroyAllWindows()
+    
+    if recognized:
+        print(f"\n✅ Welcome back, {recognized_name}!")
+        return recognized_name
+    else:
+        print("\n❌ Face not recognized")
+        return None
+
+# ==================== WORKOUT SESSION  ====================
+def workout_session(current_user=None):
+    mp_pose = mp.solutions.pose
+    mp_draw = mp.solutions.drawing_utils
+
+    pose = mp_pose.Pose(
+        min_detection_confidence=0.5,
+        min_tracking_confidence=0.5
+    )
+
+    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)            # start capturing video from webcam         
+    frame_count = 0
+    
+    if not cap.isOpened():
+        print("Camera failed to open")
+        return
+
+    right_counter = 0
+    left_counter = 0
+
+    stage_r = None
+    stage_l = None
+
+    angle_history_r = []
+    angle_history_l = []
+    
+    up_frames_r = 0
+    down_frames_r = 0
+    up_frames_l = 0
+    down_frames_l = 0
+    CONFIRM_FRAMES = 5
+
+    print("\n🏋️ Workout Started!")
+    print("Press 'r' to reset | Press ESC to quit")
+    
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        frame = cv2.flip(frame, 1)
+        frame_count += 1
+
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = pose.process(rgb)
+
+        if results.pose_landmarks: 
+            h, w = frame.shape[:2]
+            landmarks = results.pose_landmarks.landmark
+
+            shoulder = [landmarks[11].x, landmarks[11].y]      
+            elbow = [landmarks[13].x, landmarks[13].y]        
+            wrist = [landmarks[15].x, landmarks[15].y]          
+
+            shoulder_l = [landmarks[12].x, landmarks[12].y]    
+            elbow_l = [landmarks[14].x, landmarks[14].y]        
+            wrist_l = [landmarks[16].x, landmarks[16].y]        
+            
+            angle = calculate_angle(shoulder, elbow, wrist)                  
+            angle_l = calculate_angle(shoulder_l, elbow_l, wrist_l)          
+                    
+            angle_history_r.append(angle)
+            angle_history_l.append(angle_l)
+                    
+            if len(angle_history_r) > 5:
+                angle_history_r.pop(0)
+            if len(angle_history_l) > 5:
+                angle_history_l.pop(0)
+
+            angle = sum(angle_history_r) / len(angle_history_r)
+            angle_l = sum(angle_history_l) / len(angle_history_l)
+                    
+            # Right Arm
+            if angle > 165:                                                   
+                up_frames_r += 1
+                down_frames_r = 0
+
+                if up_frames_r >= CONFIRM_FRAMES:
+                    stage_r = "up"  
+
+            elif angle < 65:
+                down_frames_r += 1
+                up_frames_r = 0
+
+                if down_frames_r >= CONFIRM_FRAMES and stage_r == "up":
+                    stage_r = "down"
+                    right_counter += 1
+
+            # Left Arm
+            if angle_l > 165:                                                
+                up_frames_l += 1
+                down_frames_l = 0
+
+                if up_frames_l >= CONFIRM_FRAMES:
+                    stage_l = "up"
+
+            elif angle_l < 65:
+                down_frames_l += 1
+                up_frames_l = 0
+
+                if down_frames_l >= CONFIRM_FRAMES and stage_l == "up":
+                    stage_l = "down"
+                    left_counter += 1
+            
+            cv2.putText(frame, str(int(angle)),
+                        tuple(np.multiply(elbow, [w, h]).astype(int)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
+
+            cv2.putText(frame, str(int(angle_l)),
+                        tuple(np.multiply(elbow_l, [w, h]).astype(int)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
+
+            mp_draw.draw_landmarks(frame, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
+        
+        total_reps = right_counter + left_counter
+
+        
+        # User name
+        if current_user:
+            cv2.putText(frame, f"User: {current_user}", (20, 40),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+
+        cv2.putText(frame, "RIGHT: " + str(right_counter), (20, 80),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,0), 2)
+
+        cv2.putText(frame, "LEFT: " + str(left_counter), (20, 120),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,0), 2)
+
+        cv2.putText(frame, "TOTAL: " + str(total_reps), (20, 160),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,255), 2)
+        
+        cv2.namedWindow("FitFlex - AI Workout Trainer", cv2.WND_PROP_FULLSCREEN)
+        cv2.setWindowProperty("FitFlex - AI Workout Trainer", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+
+        cv2.imshow("FitFlex - AI Workout Trainer", frame)
+        key = cv2.waitKey(1) & 0xFF
+
+        if key == ord('r'):
+            right_counter = 0
+            left_counter = 0
+            stage_r = None
+            stage_l = None
+            up_frames_r = 0
+            down_frames_r = 0
+            up_frames_l = 0
+            down_frames_l = 0
+            angle_history_r = []
+            angle_history_l = []
+            print("✅ Counters reset!")
+
+        if key == 27:  # ESC
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+    
+    print(f"\n📊 Workout Complete!")
+    print(f"   Right Arm: {right_counter} reps")
+    print(f"   Left Arm: {left_counter} reps")
+    print(f"   Total: {total_reps} reps")
+
+# ==================== MAIN MENU ====================
+def main():
+    print("=" * 50)
+    print("🏋️  FITFLEX - AI WORKOUT TRAINER")
+    print("=" * 50)
+    
+    while True:
+        print("\n📋 MAIN MENU:")
+        print("1. Sign Up (New User)")
+        print("2. Sign In (Existing User)")
+        print("3. Start Workout (Skip Login)")
+        print("4. Exit")
+        
+        choice = input("\nEnter choice (1-4): ").strip()
+        
+        if choice == "1":
+            name = input("\nEnter your name: ").strip()
+            if name:
+                user = signup_user(name)
+                if user:
+                    input("\nPress Enter to start workout...")
+                    workout_session(user)
+        
+        elif choice == "2":
+            user = signin_user()
+            if user:
+                input("\nPress Enter to start workout...")
+                workout_session(user)
+        
+        elif choice == "3":
+            workout_session("Guest")
+        
+        elif choice == "4":
+            print("\n👋 Thanks for using FitFlex! Stay fit!")
+            break
+        
+        else:
+            print("\n❌ Invalid choice! Please enter 1-4")
+
+if __name__ == "__main__":
+    main()
