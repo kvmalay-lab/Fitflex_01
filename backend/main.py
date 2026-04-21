@@ -104,6 +104,16 @@ async def start_session(req: StartSessionRequest, user=Depends(get_current_user)
     return {"session_id": session_id, "status": "started", "exercise": req.exercise_type}
 
 
+@app.post("/api/session/save")
+async def save_completed_session(payload: dict, user=Depends(get_current_user)):
+    """Persist a session computed on the client (browser-only mode)."""
+    user_id = user["sub"]
+    payload["user_id"] = user_id
+    if payload.get("total_reps", 0) >= config.SESSION_MIN_REPS_TO_SAVE or payload.get("exercise") == "plank":
+        database.save_session(payload)
+    return {"status": "saved"}
+
+
 @app.post("/api/session/stop")
 async def stop_session(user=Depends(get_current_user)):
     user_id = user["sub"]

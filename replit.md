@@ -5,10 +5,12 @@ A full-stack AI gym coaching PWA with real-time pose tracking, form analysis, an
 ## Architecture
 
 - **Frontend**: React 19 + TypeScript + Vite + Tailwind CSS + Redux Toolkit (port 5000)
-- **Backend**: Python FastAPI + uvicorn (port 8000)
+- **Pose Detection**: BROWSER-SIDE via `@mediapipe/tasks-vision` (PoseLandmarker)
+  — uses `getUserMedia()` + GPU-accelerated WASM. No camera-side server needed.
+- **Backend**: Python FastAPI on port 8000 (auth + session storage only)
 - **Auth**: JWT tokens, PIN-based login (4-6 digit gym PINs)
 - **Database**: SQLite via SQLAlchemy (backend/data/sessions.db)
-- **Real-time**: WebSocket at 10Hz (100ms), streaming workout data to frontend
+- **Session save**: After workout, frontend POSTs the computed summary to `/api/session/save`
 
 ## Workflows
 
