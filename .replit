@@ -60,3 +60,8 @@ externalPort = 3001
 [[ports]]
 localPort = 8000
 externalPort = 80
+
+[deployment]
+build = ["sh", "-c", "npm install && npm run build && pip install -r backend/requirements.txt"]
+run = ["sh", "-c", "cd backend && uvicorn main:app --host 0.0.0.0 --port 8000"]
+deploymentTarget = "cloudrun"
