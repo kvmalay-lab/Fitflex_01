@@ -9,7 +9,9 @@ from typing import Optional, Dict, Set
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from jose import JWTError, jwt
 
@@ -179,3 +181,20 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str, token: Optional
         pass
     finally:
         ws_connections.get(user_id, set()).discard(websocket)
+
+
+# --- Serve built frontend (production) ---
+DIST_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dist")
+if os.path.isdir(DIST_DIR):
+    assets_dir = os.path.join(DIST_DIR, "assets")
+    if os.path.isdir(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+    @app.get("/{full_path:path}")
+    async def spa_fallback(full_path: str):
+        if full_path.startswith("api") or full_path.startswith("ws"):
+            raise HTTPException(status_code=404)
+        candidate = os.path.join(DIST_DIR, full_path)
+        if full_path and os.path.isfile(candidate):
+            return FileResponse(candidate)
+        return FileResponse(os.path.join(DIST_DIR, "index.html"))
