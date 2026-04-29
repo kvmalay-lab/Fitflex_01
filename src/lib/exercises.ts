@@ -41,19 +41,24 @@ export function calculateAngle(a: LandmarkPoint, b: LandmarkPoint, c: LandmarkPo
   return angle;
 }
 
-function avgAngle(left: number | null, right: number | null): number | null {
+/**
+ * Use the "leading limb" angle — the smaller angle (more flexed limb) drives
+ * the rep count. Lets single-arm/leg movements still register, and avoids
+ * averaging out a still limb when the user is doing alternating reps.
+ */
+function leadAngle(left: number | null, right: number | null): number | null {
   if (left == null && right == null) return null;
   if (left == null) return right;
   if (right == null) return left;
-  return (left + right) / 2;
+  return Math.min(left, right);
 }
 
 export const EXERCISES: Record<string, ExerciseDef> = {
   bicep_curl: {
     id: 'bicep_curl',
     name: 'Bicep Curl',
-    thresholdLow: 65,
-    thresholdHigh: 165,
+    thresholdLow: 70,
+    thresholdHigh: 155,
     startState: 'UP',
     cues: { startCue: 'Extend your arms', endCue: 'Curl up' },
     highlightLandmarks: [11, 13, 15, 12, 14, 16],
@@ -62,7 +67,7 @@ export const EXERCISES: Record<string, ExerciseDef> = {
       const rs = lm[12], re = lm[14], rw = lm[16];
       const left = visible(ls) && visible(le) && visible(lw) ? calculateAngle(ls, le, lw) : null;
       const right = visible(rs) && visible(re) && visible(rw) ? calculateAngle(rs, re, rw) : null;
-      return avgAngle(left, right);
+      return leadAngle(left, right);
     },
     detectErrors: (lm) => {
       const errors: { type: string; message: string; penalty: number }[] = [];
@@ -90,7 +95,7 @@ export const EXERCISES: Record<string, ExerciseDef> = {
       const rh = lm[24], rk = lm[26], ra = lm[28];
       const left = visible(lh) && visible(lk) && visible(la) ? calculateAngle(lh, lk, la) : null;
       const right = visible(rh) && visible(rk) && visible(ra) ? calculateAngle(rh, rk, ra) : null;
-      return avgAngle(left, right);
+      return leadAngle(left, right);
     },
     detectErrors: (lm) => {
       const errors: { type: string; message: string; penalty: number }[] = [];
@@ -119,7 +124,7 @@ export const EXERCISES: Record<string, ExerciseDef> = {
       const rs = lm[12], rh = lm[24], rk = lm[26];
       const left = visible(ls) && visible(lh) && visible(lk) ? calculateAngle(ls, lh, lk) : null;
       const right = visible(rs) && visible(rh) && visible(rk) ? calculateAngle(rs, rh, rk) : null;
-      return avgAngle(left, right);
+      return leadAngle(left, right);
     },
     detectErrors: (lm) => {
       const errors: { type: string; message: string; penalty: number }[] = [];
@@ -148,7 +153,7 @@ export const EXERCISES: Record<string, ExerciseDef> = {
       const rs = lm[12], re = lm[14], rw = lm[16];
       const left = visible(ls) && visible(le) && visible(lw) ? calculateAngle(ls, le, lw) : null;
       const right = visible(rs) && visible(re) && visible(rw) ? calculateAngle(rs, re, rw) : null;
-      return avgAngle(left, right);
+      return leadAngle(left, right);
     },
   },
 
@@ -165,7 +170,7 @@ export const EXERCISES: Record<string, ExerciseDef> = {
       const rs = lm[12], re = lm[14], rw = lm[16];
       const left = visible(ls) && visible(le) && visible(lw) ? calculateAngle(ls, le, lw) : null;
       const right = visible(rs) && visible(re) && visible(rw) ? calculateAngle(rs, re, rw) : null;
-      return avgAngle(left, right);
+      return leadAngle(left, right);
     },
   },
 

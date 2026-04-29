@@ -6,12 +6,27 @@ import FormGauge from '../components/FormGauge';
 import RepCounter from '../components/RepCounter';
 import ErrorAlert from '../components/ErrorAlert';
 import ExerciseLabel from '../components/ExerciseLabel';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { resetSession, setExercise, setSessionSummary } from '../store/workoutSlice';
 import { EXERCISE_LIST } from '../lib/exercises';
 import { usePoseTracker } from '../hooks/usePoseTracker';
 import { SessionSummary, RepData, TopError } from '../types/workout';
+
+const EXERCISE_NAMES: Record<string, string> = {
+  bicep_curl: 'Bicep Curl', lat_pulldown: 'Lat Pulldown', squat: 'Squat',
+  shoulder_press: 'Shoulder Press', deadlift: 'Deadlift', plank: 'Plank',
+};
+
+function fmtRelative(iso: string | null): string {
+  if (!iso) return '';
+  const then = new Date(iso).getTime();
+  const diffMin = Math.floor((Date.now() - then) / 60000);
+  if (diffMin < 1) return 'just now';
+  if (diffMin < 60) return `${diffMin}m ago`;
+  if (diffMin < 1440) return `${Math.floor(diffMin / 60)}h ago`;
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
 
 interface Props { user: User; onLogout: () => void; }
 
@@ -59,14 +74,26 @@ function buildSummary(
   };
 }
 
+interface HistoryItem {
+  session_id: string;
+  exercise: string;
+  total_reps: number;
+  avg_form_score: number;
+  duration_seconds: number;
+  created_at: string | null;
+}
+
 export default function LiveDashboard({ user, onLogout }: Props) {
   const navigate = useNavigate();
   const dispatch = useDispatch();
-  const { repCount, formScore, errors, repHistory, sessionStatus, currentExercise, holdDuration, currentRepStage, sessionSummary } =
+  const { repCount, formScore, errors, repHistory, sessionStatus, currentExercise, holdDuration, currentRepStage } =
     useSelector((s: RootState) => s.workout);
 
   const [selectedExercise, setSelectedExercise] = useState(currentExercise || 'bicep_curl');
   const [sessionActive, setSessionActive] = useState(false);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [lastSavedReps, setLastSavedReps] = useState<number | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -78,15 +105,29 @@ export default function LiveDashboard({ user, onLogout }: Props) {
     canvasRef,
   });
 
-  useEffect(() => {
-    if (sessionSummary && !sessionActive) {
-      navigate('/summary');
+  const loadHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    try {
+      const r = await fetch(`/api/sessions/${user.user_id}`, {
+        headers: { Authorization: `Bearer ${user.token}` },
+      });
+      const data = await r.json();
+      setHistory(Array.isArray(data) ? data : []);
+    } catch {
+      setHistory([]);
+    } finally {
+      setHistoryLoading(false);
     }
-  }, [sessionSummary, sessionActive, navigate]);
+  }, [user]);
+
+  useEffect(() => {
+    if (!sessionActive) loadHistory();
+  }, [sessionActive, loadHistory]);
 
   const startSession = async () => {
     dispatch(resetSession());
     dispatch(setExercise(selectedExercise));
+    setLastSavedReps(null);
     setSessionActive(true);
     await tracker.start();
   };
@@ -99,7 +140,6 @@ export default function LiveDashboard({ user, onLogout }: Props) {
     tracker.stop();
     const summary = buildSummary(selectedExercise, user.user_id, reps, duration, hold);
 
-    // Persist to backend
     try {
       await fetch('/api/session/save', {
         method: 'POST',
@@ -109,6 +149,8 @@ export default function LiveDashboard({ user, onLogout }: Props) {
     } catch {}
 
     dispatch(setSessionSummary(summary));
+    setLastSavedReps(summary.total_reps);
+    loadHistory();
   };
 
   const isPlank = selectedExercise === 'plank';
@@ -179,14 +221,70 @@ export default function LiveDashboard({ user, onLogout }: Props) {
               </div>
             )}
 
-            {repHistory.length > 0 && (
-              <button
-                onClick={() => navigate('/rep-breakdown')}
-                className="w-full py-3 rounded-xl text-slate-300 text-sm font-semibold bg-slate-800 hover:bg-slate-700 transition-all"
-              >
-                View Last Session Breakdown →
-              </button>
+            {lastSavedReps !== null && (
+              <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4 text-center">
+                <p className="text-emerald-300 text-xs font-bold uppercase tracking-wider">Saved</p>
+                <p className="text-white text-sm mt-1">
+                  Last workout: <span className="font-bold">{lastSavedReps} {isPlank ? 'sec' : 'reps'}</span>
+                </p>
+                <button
+                  onClick={() => navigate('/summary')}
+                  className="mt-2 text-emerald-400 text-xs font-semibold hover:underline"
+                >
+                  View full summary →
+                </button>
+              </div>
             )}
+
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-white font-bold text-sm">Recent Workouts</h2>
+                {history.length > 0 && (
+                  <button
+                    onClick={() => navigate('/progress')}
+                    className="text-emerald-400 text-xs font-semibold hover:underline"
+                  >
+                    See all →
+                  </button>
+                )}
+              </div>
+              {historyLoading ? (
+                <p className="text-slate-600 text-xs text-center py-4">Loading…</p>
+              ) : history.length === 0 ? (
+                <p className="text-slate-600 text-xs text-center py-4">
+                  No workouts yet. Start one above to begin your history.
+                </p>
+              ) : (
+                <div className="flex flex-col gap-1.5">
+                  {history.slice(0, 5).map((h) => (
+                    <div
+                      key={h.session_id}
+                      className="flex items-center justify-between bg-slate-800/50 rounded-lg px-3 py-2.5"
+                    >
+                      <div className="flex flex-col">
+                        <span className="text-white text-sm font-semibold">
+                          {EXERCISE_NAMES[h.exercise] || h.exercise}
+                        </span>
+                        <span className="text-slate-500 text-xs">{fmtRelative(h.created_at)}</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="text-right">
+                          <div className="text-white text-sm font-bold tabular-nums">
+                            {h.total_reps}
+                            <span className="text-slate-500 text-xs font-normal ml-1">
+                              {h.exercise === 'plank' ? 'sec' : 'reps'}
+                            </span>
+                          </div>
+                          <div className="text-slate-500 text-xs">
+                            {Math.round(h.avg_form_score || 0)} form
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
             <p className="text-slate-600 text-xs text-center">
               Allow camera access when prompted. Pose data stays in your browser.
