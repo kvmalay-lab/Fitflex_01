@@ -108,7 +108,8 @@ export default function LiveDashboard({ user, onLogout }: Props) {
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true);
     try {
-      const r = await fetch(`/api/sessions/${user.user_id}`, {
+      const apiUrl = import.meta.env.VITE_API_URL || '/api';
+      const r = await fetch(`${apiUrl}/sessions/${user.user_id}`, {
         headers: { Authorization: `Bearer ${user.token}` },
       });
       const data = await r.json();
@@ -141,7 +142,8 @@ export default function LiveDashboard({ user, onLogout }: Props) {
     const summary = buildSummary(selectedExercise, user.user_id, reps, duration, hold);
 
     try {
-      await fetch('/api/session/save', {
+      const apiUrl = import.meta.env.VITE_API_URL || '/api';
+      await fetch(`${apiUrl}/session/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${user.token}` },
         body: JSON.stringify(summary),
