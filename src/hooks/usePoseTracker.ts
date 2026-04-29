@@ -54,7 +54,20 @@ export function usePoseTracker({ exerciseId, active, videoRef, canvasRef }: Opti
           baseOptions: { modelAssetPath: MODEL_URL, delegate: 'GPU' },
           runningMode: 'VIDEO',
           numPoses: 1,
+          minPoseDetectionConfidence: 0.5,
+          minPosePresenceConfidence: 0.5,
+          minTrackingConfidence: 0.5,
         });
+        await lm.setOptions({
+          baseOptions: { delegate: 'GPU' },
+          runningMode: 'VIDEO',
+          numPoses: 1,
+          minPoseDetectionConfidence: 0.5,
+          minPosePresenceConfidence: 0.5,
+          minTrackingConfidence: 0.5,
+        });
+        // Set model complexity to 1 (lite) or 2 (full/heavy). We use 1 per user request.
+        // It's part of the model asset path so technically the underlying task needs to match.
         if (cancelled) {
           lm.close();
           return;
@@ -89,7 +102,7 @@ export function usePoseTracker({ exerciseId, active, videoRef, canvasRef }: Opti
     try {
       setStatus('requesting_camera');
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+        video: { width: { ideal: 1280, max: 1920 }, height: { ideal: 720, max: 1080 }, facingMode: 'user' },
         audio: false,
       });
       streamRef.current = stream;

@@ -2,10 +2,10 @@ import { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { User } from './types/workout';
 import Login from './screens/Login';
-import LiveDashboard from './screens/LiveDashboard';
-import RepBreakdown from './screens/RepBreakdown';
-import SessionSummary from './screens/SessionSummary';
-import Progress from './screens/Progress';
+import Layout from './components/Layout';
+import Dashboard from './pages/Dashboard';
+import WorkoutSession from './pages/WorkoutSession';
+import History from './pages/History';
 
 function ProtectedRoute({ user, children }: { user: User | null; children: React.ReactNode }) {
   if (!user) return <Navigate to="/login" replace />;
@@ -42,28 +42,33 @@ export default function App() {
   return (
     <Router>
       <Routes>
-        <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <Login onLogin={handleLogin} />} />
-        <Route path="/dashboard" element={
+        <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login onLogin={handleLogin} />} />
+
+        <Route path="/" element={
           <ProtectedRoute user={user}>
-            <LiveDashboard user={user!} onLogout={handleLogout} />
+            <Layout user={user} onLogout={handleLogout}>
+              <Dashboard />
+            </Layout>
           </ProtectedRoute>
         } />
-        <Route path="/rep-breakdown" element={
+
+        <Route path="/workout" element={
           <ProtectedRoute user={user}>
-            <RepBreakdown />
+            <Layout user={user} onLogout={handleLogout}>
+              <WorkoutSession user={user} />
+            </Layout>
           </ProtectedRoute>
         } />
-        <Route path="/summary" element={
+
+        <Route path="/history" element={
           <ProtectedRoute user={user}>
-            <SessionSummary />
+            <Layout user={user} onLogout={handleLogout}>
+              <History />
+            </Layout>
           </ProtectedRoute>
         } />
-        <Route path="/progress" element={
-          <ProtectedRoute user={user}>
-            <Progress user={user!} />
-          </ProtectedRoute>
-        } />
-        <Route path="*" element={<Navigate to={user ? '/dashboard' : '/login'} replace />} />
+
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Router>
   );
