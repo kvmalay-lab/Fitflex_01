@@ -1,4 +1,11 @@
+/**
+ * Workout history hook — backed by the FastAPI + Replit Postgres `sessions`
+ * table (single source of truth as of Phase 4). LocalStorage is no longer
+ * used; sessions are scoped to the authenticated user via JWT.
+ */
+
 import { useState, useEffect, useCallback } from 'react';
+import { listSessions, SessionRecord } from '../lib/api';
 
 export interface WorkoutHistorySession {
   id: string;
@@ -6,59 +13,54 @@ export interface WorkoutHistorySession {
   exercise: string;
   reps: number;
   accuracy: number;
-  confidence: number;
+  durationSeconds: number;
 }
 
-const STORAGE_KEY = 'fitflex_workout_history';
+function toDisplay(s: SessionRecord): WorkoutHistorySession {
+  return {
+    id: s.id,
+    date: s.created_at,
+    exercise: s.exercise,
+    reps: s.total_reps,
+    accuracy: Math.round(s.avg_form_score),
+    durationSeconds: s.duration_seconds,
+  };
+}
 
 export function useWorkoutHistory() {
   const [history, setHistory] = useState<WorkoutHistorySession[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        setHistory(JSON.parse(stored));
-      }
-    } catch (e) {
-      console.error('Failed to load workout history from local storage', e);
+      const rows = await listSessions();
+      setHistory(rows.map(toDisplay));
+    } catch (e: any) {
+      console.error('Failed to load workout history', e);
+      setError(e?.message ?? 'Failed to load history');
+      setHistory([]);
+    } finally {
+      setLoading(false);
     }
   }, []);
 
-  const getHistory = useCallback(() => {
-    return history;
-  }, [history]);
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   const getLast7Days = useCallback(() => {
-    const now = new Date();
-    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    return history.filter((session) => new Date(session.date) >= sevenDaysAgo);
+    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    return history.filter((s) => new Date(s.date).getTime() >= cutoff);
   }, [history]);
-
-  const addSession = useCallback((session: Omit<WorkoutHistorySession, 'id' | 'date'> & { date?: string }) => {
-    const newSession: WorkoutHistorySession = {
-      ...session,
-      id: crypto.randomUUID(),
-      date: session.date || new Date().toISOString(),
-    };
-
-    setHistory((prev) => {
-      const updated = [newSession, ...prev];
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-      } catch (e) {
-        console.error('Failed to save workout history to local storage', e);
-      }
-      return updated;
-    });
-
-    return newSession;
-  }, []);
 
   return {
     history,
-    getHistory,
+    loading,
+    error,
+    refresh,
     getLast7Days,
-    addSession,
   };
 }

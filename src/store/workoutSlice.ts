@@ -1,5 +1,6 @@
-import { createSlice, PayloadAction } from '@reduxjs/toolkit';
+import { createSlice, PayloadAction, createAsyncThunk } from '@reduxjs/toolkit';
 import { WorkoutPayload, FormError, RepData, SessionSummary } from '../types/workout';
+import { createSession, SessionRecord } from '../lib/api';
 
 interface WorkoutState {
   currentExercise: string;
@@ -15,6 +16,9 @@ interface WorkoutState {
   durationSeconds: number;
   currentRepStage: string;
   sessionId: string | null;
+  isSaving: boolean;
+  saveError: string | null;
+  lastSavedSessionId: string | null;
 }
 
 const initialState: WorkoutState = {
@@ -31,7 +35,49 @@ const initialState: WorkoutState = {
   durationSeconds: 0,
   currentRepStage: 'ready',
   sessionId: null,
+  isSaving: false,
+  saveError: null,
+  lastSavedSessionId: null,
 };
+
+export interface SaveSessionInput {
+  exercise: string;
+  total_reps: number;
+  avg_form_score: number;
+  duration_seconds: number;
+  rep_history: RepData[];
+}
+
+/**
+ * Persist a completed session to the backend (Replit Postgres). This is the
+ * only write path for workout history — there is no localStorage / dual-write.
+ */
+export const saveSession = createAsyncThunk<SessionRecord, SaveSessionInput>(
+  'workout/saveSession',
+  async (input, { rejectWithValue }) => {
+    try {
+      const record = await createSession({
+        exercise: input.exercise,
+        total_reps: input.total_reps,
+        avg_form_score: input.avg_form_score,
+        duration_seconds: input.duration_seconds,
+        rep_history: input.rep_history.map((r) => ({
+          rep_number: r.rep_number,
+          peak_angle: r.peak_angle,
+          form_score: r.form_score,
+          errors: (r.errors ?? []).map((e) => ({
+            type: e.type,
+            message: e.message,
+            penalty: e.penalty,
+          })),
+        })),
+      });
+      return record;
+    } catch (e: any) {
+      return rejectWithValue(e?.message ?? 'Failed to save session');
+    }
+  }
+);
 
 const workoutSlice = createSlice({
   name: 'workout',
@@ -69,12 +115,30 @@ const workoutSlice = createSlice({
       state.durationSeconds = 0;
       state.currentRepStage = 'ready';
       state.sessionId = null;
+      state.saveError = null;
     },
     setExercise(state, action: PayloadAction<string>) {
       state.currentExercise = action.payload;
     },
   },
+  extraReducers: (builder) => {
+    builder
+      .addCase(saveSession.pending, (state) => {
+        state.isSaving = true;
+        state.saveError = null;
+      })
+      .addCase(saveSession.fulfilled, (state, action) => {
+        state.isSaving = false;
+        state.lastSavedSessionId = action.payload.id;
+        state.sessionStatus = 'SAVED';
+      })
+      .addCase(saveSession.rejected, (state, action) => {
+        state.isSaving = false;
+        state.saveError = (action.payload as string) ?? 'Failed to save session';
+      });
+  },
 });
 
-export const { updateWorkout, setConnected, setSessionSummary, resetSession, setExercise } = workoutSlice.actions;
+export const { updateWorkout, setConnected, setSessionSummary, resetSession, setExercise } =
+  workoutSlice.actions;
 export default workoutSlice.reducer;

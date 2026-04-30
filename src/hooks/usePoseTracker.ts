@@ -6,16 +6,14 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useDispatch } from 'react-redux';
-import { FilesetResolver, PoseLandmarker, PoseLandmarkerResult } from '@mediapipe/tasks-vision';
+import { PoseLandmarkerResult } from '@mediapipe/tasks-vision';
 import { EXERCISES, LandmarkPoint } from '../lib/exercises';
-import { RepCounter } from '../lib/RepCounter';
+import { RepCounter, Stage } from '../lib/RepCounter';
 import { drawSkeleton } from '../lib/poseDraw';
 import { updateWorkout } from '../store/workoutSlice';
 import { RepData, FormError } from '../types/workout';
-
-const MODEL_URL =
-  'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task';
-const WASM_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm';
+import { playErrorBeep } from '../lib/audioFeedback';
+import { poseService } from '../services/PoseService';
 
 export type TrackerStatus = 'idle' | 'loading_model' | 'requesting_camera' | 'ready' | 'running' | 'error';
 
@@ -24,15 +22,25 @@ interface Options {
   active: boolean;
   videoRef: React.RefObject<HTMLVideoElement>;
   canvasRef: React.RefObject<HTMLCanvasElement>;
+  /** Called when a rep is confirmed by the FSM (after 5-frame buffer). */
+  onRepConfirmed?: (rep: number) => void;
+  /** Called whenever the FSM stage flips, with the new stage. */
+  onStageChange?: (stage: Stage) => void;
 }
 
-export function usePoseTracker({ exerciseId, active, videoRef, canvasRef }: Options) {
+export function usePoseTracker({
+  exerciseId,
+  active,
+  videoRef,
+  canvasRef,
+  onRepConfirmed,
+  onStageChange,
+}: Options) {
   const dispatch = useDispatch();
   const [status, setStatus] = useState<TrackerStatus>('idle');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [personDetected, setPersonDetected] = useState(false);
 
-  const landmarkerRef = useRef<PoseLandmarker | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const counterRef = useRef<RepCounter | null>(null);
   const repHistoryRef = useRef<RepData[]>([]);
@@ -42,37 +50,25 @@ export function usePoseTracker({ exerciseId, active, videoRef, canvasRef }: Opti
   const noPersonSinceRef = useRef<number | null>(null);
   const planlHoldRef = useRef<number>(0);
   const lastTickRef = useRef<number>(0);
+  const prevStageRef = useRef<Stage | null>(null);
+  const onRepConfirmedRef = useRef(onRepConfirmed);
+  const onStageChangeRef = useRef(onStageChange);
+  useEffect(() => {
+    onRepConfirmedRef.current = onRepConfirmed;
+    onStageChangeRef.current = onStageChange;
+  }, [onRepConfirmed, onStageChange]);
 
-  // Load model once
+  // Initialize the singleton PoseService once. We intentionally do NOT
+  // destroy() it on unmount — multiple components may mount/unmount during
+  // navigation and re-loading the WASM is expensive. The browser reclaims it
+  // on tab close.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         setStatus('loading_model');
-        const fileset = await FilesetResolver.forVisionTasks(WASM_URL);
-        const lm = await PoseLandmarker.createFromOptions(fileset, {
-          baseOptions: { modelAssetPath: MODEL_URL, delegate: 'GPU' },
-          runningMode: 'VIDEO',
-          numPoses: 1,
-          minPoseDetectionConfidence: 0.5,
-          minPosePresenceConfidence: 0.5,
-          minTrackingConfidence: 0.5,
-        });
-        await lm.setOptions({
-          baseOptions: { delegate: 'GPU' },
-          runningMode: 'VIDEO',
-          numPoses: 1,
-          minPoseDetectionConfidence: 0.5,
-          minPosePresenceConfidence: 0.5,
-          minTrackingConfidence: 0.5,
-        });
-        // Set model complexity to 1 (lite) or 2 (full/heavy). We use 1 per user request.
-        // It's part of the model asset path so technically the underlying task needs to match.
-        if (cancelled) {
-          lm.close();
-          return;
-        }
-        landmarkerRef.current = lm;
+        await poseService.initialize();
+        if (cancelled) return;
         setStatus('ready');
       } catch (e: any) {
         console.error('Pose model load failed', e);
@@ -82,8 +78,6 @@ export function usePoseTracker({ exerciseId, active, videoRef, canvasRef }: Opti
     })();
     return () => {
       cancelled = true;
-      landmarkerRef.current?.close();
-      landmarkerRef.current = null;
     };
   }, []);
 
@@ -138,7 +132,7 @@ export function usePoseTracker({ exerciseId, active, videoRef, canvasRef }: Opti
     if (videoRef.current) videoRef.current.srcObject = null;
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
-    setStatus(landmarkerRef.current ? 'ready' : 'idle');
+    setStatus(poseService.isReady() ? 'ready' : 'idle');
   }, [videoRef]);
 
   // Detection loop
@@ -147,8 +141,7 @@ export function usePoseTracker({ exerciseId, active, videoRef, canvasRef }: Opti
 
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    const lm = landmarkerRef.current;
-    if (!video || !canvas || !lm) return;
+    if (!video || !canvas || !poseService.isReady()) return;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
@@ -163,8 +156,8 @@ export function usePoseTracker({ exerciseId, active, videoRef, canvasRef }: Opti
       if (video.currentTime !== lastVideoTimeRef.current && video.readyState >= 2) {
         lastVideoTimeRef.current = video.currentTime;
         try {
-          const result: PoseLandmarkerResult = lm.detectForVideo(video, now);
-          processResult(result, def, ctx, canvas, now);
+          const result = poseService.detect(video, now);
+          if (result) processResult(result as PoseLandmarkerResult, def, ctx, canvas, now);
         } catch (e) {
           // swallow per-frame errors
         }
@@ -254,7 +247,20 @@ export function usePoseTracker({ exerciseId, active, videoRef, canvasRef }: Opti
           form_score: formScore,
           errors: errors.map((e) => ({ ...e, confidence: 1 })),
         });
+        onRepConfirmedRef.current?.(r.reps);
       }
+      // Notify on stage change so the UI can swap startCue/endCue.
+      if (prevStageRef.current !== r.stage) {
+        prevStageRef.current = r.stage;
+        onStageChangeRef.current?.(r.stage);
+      }
+    }
+
+    // Audio feedback: beep when there is a real form fault. The audio module
+    // enforces its own 3-second cooldown so we don't spam the user.
+    const totalPenalty = errors.reduce((s, e) => s + e.penalty, 0);
+    if (totalPenalty > 0) {
+      playErrorBeep();
     }
 
     lastTickRef.current = now;
