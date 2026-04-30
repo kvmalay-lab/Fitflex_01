@@ -24,10 +24,11 @@ export default function ExerciseLabel({ exercise, status }: ExerciseLabelProps) 
   const style = STATUS_STYLES[status] || STATUS_STYLES.IDLE;
 
   return (
-    <div className="flex items-center gap-3">
-      <h2 className="text-white font-bold text-lg leading-none">{name}</h2>
+    <div className="flex items-center gap-2">
+      <span className="text-slate-400 text-xs font-semibold uppercase">SESSION:</span>
+      <h2 className="text-white font-bold text-sm leading-none uppercase">{name}</h2>
       <span
-        className="text-xs font-bold tracking-widest uppercase px-2.5 py-1 rounded-full"
+        className="text-[10px] font-bold tracking-widest uppercase px-1.5 py-0.5 rounded-full ml-1"
         style={{ backgroundColor: style.bg, color: style.text }}
       >
         {style.label}

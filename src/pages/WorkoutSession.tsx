@@ -16,7 +16,7 @@ export default function WorkoutSession({ user }: WorkoutSessionProps) {
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const { addSession } = useWorkoutHistory();
-  const { repCount, currentExercise, errors, angles, sessionStatus, holdDuration } = useSelector(
+  const { repCount, currentExercise, errors, angles, sessionStatus, holdDuration, formScore } = useSelector(
     (state: RootState) => state.workout
   );
 
@@ -146,97 +146,80 @@ export default function WorkoutSession({ user }: WorkoutSessionProps) {
         )}
       </div>
 
-      {/* Top: Video Feed (max-w-4xl centered) */}
-      <div className="flex-1 min-h-0 flex items-center justify-center bg-slate-900/50 rounded-3xl border border-slate-800 p-4 mb-6 relative overflow-hidden">
-        <div className="relative w-full max-w-4xl aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl flex items-center justify-center">
-          {!sessionActive ? (
-            <div className="text-slate-500 flex flex-col items-center">
-              <div className="w-16 h-16 rounded-full border-4 border-slate-700 border-t-emerald-500 animate-spin mb-4" />
-              <p>{statusText}</p>
-            </div>
-          ) : (
-            <>
-              {/* The "onloadedmetadata" and standard styling ensures object-cover and alignment */}
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                className="absolute inset-0 w-full h-full object-cover"
-                style={{ transform: 'scaleX(-1)' }}
-                onLoadedMetadata={(e) => {
-                  if (canvasRef.current && videoRef.current) {
-                    canvasRef.current.width = videoRef.current.videoWidth;
-                    canvasRef.current.height = videoRef.current.videoHeight;
-                  }
-                }}
-              />
-              <canvas
-                ref={canvasRef}
-                className="absolute inset-0 w-full h-full object-cover pointer-events-none"
-                style={{ transform: 'scaleX(-1)' }}
-              />
+      {/* HUD Camera Feed (h-[72vh] w-full) */}
+      <div className="relative w-full h-[72vh] bg-black rounded-lg overflow-hidden flex items-center justify-center mb-2">
+        {!sessionActive ? (
+          <div className="text-slate-500 flex flex-col items-center">
+            <div className="w-16 h-16 rounded-full border-4 border-slate-700 border-t-emerald-500 animate-spin mb-4" />
+            <p>{statusText}</p>
+          </div>
+        ) : (
+          <>
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className="absolute inset-0 w-full h-full object-cover"
+              style={{ transform: 'scaleX(-1)' }}
+              onLoadedMetadata={(e) => {
+                if (canvasRef.current && videoRef.current) {
+                  canvasRef.current.width = videoRef.current.videoWidth;
+                  canvasRef.current.height = videoRef.current.videoHeight;
+                }
+              }}
+            />
+            <canvas
+              ref={canvasRef}
+              className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+              style={{ transform: 'scaleX(-1)' }}
+            />
 
-              {/* Fading Coach Cue Overlay */}
+            {/* Form Score Progress Bar */}
+            <div className="absolute top-0 left-0 w-full h-1.5 bg-gray-800 z-10">
               <div
-                className={`absolute inset-0 flex items-center justify-center pointer-events-none transition-opacity duration-300 ${
-                  coachCue ? 'opacity-100' : 'opacity-0'
+                className="h-full bg-green-400 transition-all duration-300 ease-out"
+                style={{ width: `${Math.max(0, Math.min(100, formScore))}%`, backgroundColor: formScore >= 76 ? '#4ade80' : formScore >= 51 ? '#facc15' : '#f87171' }}
+              />
+            </div>
+
+            {/* Fading Coach Cue Overlay */}
+            <div
+              className={`absolute bottom-8 left-1/2 -translate-x-1/2 transition-opacity duration-300 ${
+                coachCue ? 'opacity-100' : 'opacity-0'
+              }`}
+            >
+              <div
+                className={`px-6 py-3 rounded-full backdrop-blur-sm ${
+                  cueType === 'error'
+                    ? 'bg-red-500/80 text-white'
+                    : 'bg-black/60 text-white'
                 }`}
               >
-                <div
-                  className={`px-8 py-4 rounded-3xl backdrop-blur-md border ${
-                    cueType === 'error'
-                      ? 'bg-red-500/30 border-red-500/50 text-red-200'
-                      : 'bg-black/50 border-emerald-500/50 text-emerald-300'
-                  }`}
-                >
-                  <p className="text-4xl font-black uppercase tracking-wider">{coachCue}</p>
-                </div>
+                <p className="text-lg font-medium">{coachCue}</p>
               </div>
-            </>
-          )}
-        </div>
+            </div>
+          </>
+        )}
       </div>
 
-      {/* Bottom: Huge HUD Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 shrink-0 h-48">
-        {/* Card 1: Reps */}
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl flex flex-col items-center justify-center relative overflow-hidden shadow-xl">
-          <div className="absolute top-4 left-6">
-            <p className="text-slate-500 text-sm font-bold uppercase tracking-widest">
-              Total {isPlank ? 'Seconds' : 'Reps'}
-            </p>
-          </div>
-          <p className="text-9xl font-black text-white tabular-nums tracking-tighter mt-4">
-            {displayReps}
-          </p>
+      {/* Horizontal Metric Strip */}
+      <div className="flex justify-between items-center px-6 py-2 bg-slate-900/50 rounded-lg h-[50px] shrink-0">
+        <div className="flex gap-2 items-baseline">
+          <span className="text-slate-400 text-xs font-bold uppercase tracking-widest">REPS:</span>
+          <span className="text-xl font-black text-white tabular-nums">{displayReps}</span>
         </div>
-
-        {/* Card 2: AI Coach */}
-        <div
-          className={`border rounded-3xl flex flex-col items-center justify-center p-6 text-center transition-colors duration-300 shadow-xl ${
-            cueType === 'error'
-              ? 'bg-red-950/50 border-red-900 text-red-400'
-              : 'bg-emerald-950/30 border-emerald-900/50 text-emerald-400'
-          }`}
-        >
-          <p className="text-sm font-bold uppercase tracking-widest mb-2 opacity-60">Coach Cue</p>
-          <p className="text-4xl lg:text-5xl font-black leading-tight tracking-tight">
+        <div className="flex gap-2 items-baseline">
+          <span className="text-slate-400 text-xs font-bold uppercase tracking-widest">CUE:</span>
+          <span className={`text-sm font-bold uppercase ${cueType === 'error' ? 'text-red-400' : 'text-emerald-400'}`}>
             {coachCue || 'Good Form'}
-          </p>
+          </span>
         </div>
-
-        {/* Card 3: Angles */}
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl flex flex-col items-center justify-center relative overflow-hidden shadow-xl">
-          <div className="absolute top-4 left-6">
-            <p className="text-slate-500 text-sm font-bold uppercase tracking-widest">Joint Angle</p>
-          </div>
-          <div className="flex items-baseline gap-2 mt-4">
-            <p className="text-7xl font-black text-white tabular-nums">
-              {angles?.primary ? Math.round(angles.primary) : '--'}
-            </p>
-            <span className="text-4xl text-slate-500 font-bold">°</span>
-          </div>
+        <div className="flex gap-2 items-baseline">
+          <span className="text-slate-400 text-xs font-bold uppercase tracking-widest">ANGLE:</span>
+          <span className="text-xl font-black text-white tabular-nums">
+            {angles?.primary ? Math.round(angles.primary) : '--'}°
+          </span>
         </div>
       </div>
     </div>
