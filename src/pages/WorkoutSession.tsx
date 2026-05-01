@@ -96,34 +96,36 @@ export default function WorkoutSession({ user }: WorkoutSessionProps) {
     tracker.stop();
 
     const repsHistory = tracker.getRepHistory();
-    const totalReps = repsHistory.length;
+    // Fall back to Redux repCount in case the ref and the state diverged.
+    const totalReps = repsHistory.length > 0 ? repsHistory.length : repCount;
     const avgForm =
       repsHistory.length > 0
         ? repsHistory.reduce((sum, r) => sum + r.form_score, 0) / repsHistory.length
-        : 100;
+        : formScore;
 
-    if (totalReps === 0) {
-      // Nothing to save — go home.
-      navigate('/');
+    const duration = tracker.getDurationSeconds();
+
+    // Always navigate to /history after ending — whether or not a save occurs —
+    // so the user can see their previous sessions.
+    if (totalReps === 0 && duration < 5) {
+      // Session too short / no reps detected, nothing worth saving.
+      navigate('/history');
       return;
     }
 
-    const result = await dispatch(
+    await dispatch(
       saveSession({
         exercise: selectedExercise,
         total_reps: totalReps,
         avg_form_score: avgForm,
-        duration_seconds: tracker.getDurationSeconds(),
+        duration_seconds: duration,
         rep_history: repsHistory,
       })
     );
 
-    if (saveSession.fulfilled.match(result)) {
-      navigate('/history');
-    } else {
-      // Stay on the page so the user can retry; saveError is shown in the HUD.
-      console.error('Failed to save session:', result.payload);
-    }
+    // Navigate to history regardless of save success/failure so the user can
+    // see all their prior sessions. saveError is shown in the HUD if it failed.
+    navigate('/history');
   };
 
   const statusText = (() => {
