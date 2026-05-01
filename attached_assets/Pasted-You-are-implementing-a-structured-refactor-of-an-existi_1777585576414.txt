@@ -1,0 +1,185 @@
+You are implementing a structured refactor of an existing React + TypeScript + MediaPipe + FastAPI fitness tracking application called FitFlex. Do not redesign the system. Do not introduce new libraries unless explicitly stated. Do not change working components unless required by the steps below.
+
+Your objective is to improve tracking accuracy, persistence, and architecture in a controlled sequence. Follow the phases strictly. Do not skip ahead. Do not refactor prematurely.
+
+GLOBAL CONSTRAINTS
+Preserve all existing functionality unless explicitly modified
+Do not introduce unnecessary abstractions
+Do not implement features outside defined scope
+Prefer minimal, testable changes per phase
+One source of truth for persistence (no dual-write systems)
+Prioritize tracking accuracy over UI or architecture
+PHASE 1: FOUNDATION
+Ensure React Router is correctly configured with routes:
+"/", "/workout", "/history"
+Ensure Layout component wraps all pages with a stable <main> area
+Fix navigation using NavLink with active state
+PHASE 2: CORE TRACKING VALIDATION (HIGHEST PRIORITY)
+
+Work inside:
+
+src/lib/exercises.ts
+src/lib/RepCounter.ts
+src/hooks/usePoseTracker.ts
+
+Tasks:
+
+Fix thresholds:
+Squat: thresholdLow = 90, thresholdHigh = 160
+Bicep Curl: thresholdLow = 35, thresholdHigh = 160
+Lat Pulldown:
+Add wrist depth validation (wrist must reach chest level)
+Add elbow angle check at contraction (target 45–60 degrees)
+Emit "Incomplete Range of Motion" error with penalty
+RepCounter:
+Ensure 5-frame confirmation buffer is applied at BOTH:
+thresholdLow crossing
+thresholdHigh crossing
+No rep should increment without confirmation
+Restrict exercise scope:
+Disable Deadlift and Shoulder Press from active list
+Only allow:
+Squat
+Bicep Curl
+Lat Pulldown
+
+Goal:
+Rep counting must be stable and visually consistent.
+
+PHASE 3: FEEDBACK LAYER
+
+Create:
+
+src/lib/audioFeedback.ts
+
+Tasks:
+
+Implement Web Audio API beep (no external files)
+Add 3-second cooldown between audio alerts
+Trigger audio ONLY when:
+detectErrors returns penalty > 0
+Especially for "Incomplete Range of Motion"
+
+UI:
+
+Add "Rep Confirmed" flash on rep increment
+Add dynamic coach cue:
+startCue when moving up
+endCue when moving down
+
+Goal:
+User must clearly perceive correctness and errors.
+
+PHASE 4: PERSISTENCE (SINGLE SOURCE OF TRUTH)
+
+Use Bolt Database (Supabase)
+
+Tasks:
+
+Create sessions table:
+id (UUID)
+user_id (text)
+exercise (text)
+total_reps (int)
+avg_form_score (numeric)
+duration_seconds (int)
+rep_history (JSONB)
+created_at (timestamp)
+Enable RLS (user can only access own records)
+Replace localStorage in:
+useWorkoutHistory.ts
+With:
+supabase.from('sessions').insert()
+supabase.from('sessions').select()
+Remove dual-write logic. Do NOT send to FastAPI.
+
+Goal:
+Reliable save + fetch. No duplication systems.
+
+PHASE 5: MINIMAL STATE MANAGEMENT
+
+Work in:
+
+workoutSlice.ts
+
+Tasks:
+
+Add async saveSession action (Bolt only)
+Add:
+isSaving
+lastSavedSessionId
+Update WorkoutSession.tsx:
+stopSession → dispatch(saveSession)
+
+Goal:
+Track persistence state without over-engineering.
+
+PHASE 6: UI ENHANCEMENTS
+
+WorkoutSession:
+
+Add form score bar:
+Green >80
+Yellow 50–80
+Red <50
+Add Lat Pulldown depth indicator (wrist vs shoulder line)
+
+History Page:
+
+Fetch from Bolt Database
+Add loading + empty state
+Display:
+exercise
+reps
+form score
+date/time
+
+Do NOT add charts yet.
+
+PHASE 7: ARCHITECTURE CLEANUP
+
+Create:
+
+src/services/PoseService.ts
+
+Move:
+
+MediaPipe initialization
+WASM resolver
+PoseLandmarker lifecycle
+detectForVideo()
+
+Expose:
+
+initialize()
+detect(video, timestamp)
+destroy()
+
+Update:
+
+usePoseTracker.ts to use PoseService
+
+Goal:
+Clean separation AFTER tracking is stable.
+
+PHASE 8: DEPLOYMENT ALIGNMENT
+Add VITE_API_URL to env
+Configure Vite proxy for /api
+Update vercel.json rewrites
+Fix CORS in FastAPI
+
+Do NOT change API design.
+
+NON-GOALS
+No new exercises
+No charts (Recharts)
+No redesign of UI system
+No performance micro-optimizations beyond smoothing
+No premature abstraction
+SUCCESS CRITERIA
+Rep counting is stable and consistent
+Errors are detected and clearly communicated
+Sessions are saved and retrievable
+System works for 3 exercises with high reliability
+
+Execute phase by phase. Do not jump steps. Validate each phase before proceeding.

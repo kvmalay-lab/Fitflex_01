@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
-import { RootState } from '../store';
-import { resetSession, setExercise } from '../store/workoutSlice';
+import { RootState, AppDispatch } from '../store';
+import { resetSession, setExercise, saveSession } from '../store/workoutSlice';
 import { usePoseTracker } from '../hooks/usePoseTracker';
-import { useWorkoutHistory } from '../hooks/useWorkoutHistory';
 import { EXERCISE_LIST, EXERCISES } from '../lib/exercises';
+import { Stage } from '../lib/RepCounter';
+import { unlockAudio, resetAudioCooldown } from '../lib/audioFeedback';
 import { User } from '../types/workout';
 
 interface WorkoutSessionProps {
@@ -14,9 +15,8 @@ interface WorkoutSessionProps {
 
 export default function WorkoutSession({ user }: WorkoutSessionProps) {
   const navigate = useNavigate();
-  const dispatch = useDispatch();
-  const { addSession } = useWorkoutHistory();
-  const { repCount, currentExercise, errors, angles, sessionStatus, holdDuration, formScore } = useSelector(
+  const dispatch = useDispatch<AppDispatch>();
+  const { repCount, currentExercise, errors, angles, formScore, isSaving, saveError } = useSelector(
     (state: RootState) => state.workout
   );
 
@@ -24,6 +24,9 @@ export default function WorkoutSession({ user }: WorkoutSessionProps) {
   const [sessionActive, setSessionActive] = useState(false);
   const [coachCue, setCoachCue] = useState('');
   const [cueType, setCueType] = useState<'normal' | 'error'>('normal');
+  const [repFlash, setRepFlash] = useState(false);
+  const [stage, setStage] = useState<Stage>('UP');
+  const flashTimerRef = useRef<number | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -33,10 +36,21 @@ export default function WorkoutSession({ user }: WorkoutSessionProps) {
     active: sessionActive,
     videoRef,
     canvasRef,
+    onRepConfirmed: () => {
+      setRepFlash(true);
+      if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current);
+      flashTimerRef.current = window.setTimeout(() => setRepFlash(false), 600);
+    },
+    onStageChange: (s) => setStage(s),
   });
 
-  const isPlank = selectedExercise === 'plank';
-  const displayReps = isPlank ? Math.floor(holdDuration) : repCount;
+  useEffect(() => {
+    return () => {
+      if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current);
+    };
+  }, []);
+
+  const displayReps = repCount;
 
   // Handle Coach Cue logic
   useEffect(() => {
@@ -59,41 +73,57 @@ export default function WorkoutSession({ user }: WorkoutSessionProps) {
     } else {
       const def = EXERCISES[selectedExercise];
       if (def) {
-        setCoachCue(def.cues.startCue); // Simplified cue logic; ideally driven by rep stage
+        // Dynamic cue: when the user is moving toward the UP threshold show
+        // the startCue ("come up"), when moving toward the DOWN threshold
+        // show the endCue ("go down/curl/pull").
+        setCoachCue(stage === 'DOWN' ? def.cues.startCue : def.cues.endCue);
         setCueType('normal');
       }
     }
-  }, [sessionActive, errors, selectedExercise, tracker.personDetected, tracker.status]);
+  }, [sessionActive, errors, selectedExercise, tracker.personDetected, tracker.status, stage]);
 
   const startSession = async () => {
+    unlockAudio();
+    resetAudioCooldown();
     dispatch(resetSession());
     dispatch(setExercise(selectedExercise));
     setSessionActive(true);
     await tracker.start();
   };
 
-  const stopSession = () => {
+  const stopSession = async () => {
     setSessionActive(false);
     tracker.stop();
 
-    // Calculate accuracy (avg form score)
-    const history = tracker.getRepHistory();
-    const totalReps = isPlank ? Math.floor(tracker.getHoldDuration()) : history.length;
-    let avgForm = 100;
-    if (history.length > 0) {
-      avgForm = history.reduce((sum, r) => sum + r.form_score, 0) / history.length;
+    const repsHistory = tracker.getRepHistory();
+    const totalReps = repsHistory.length;
+    const avgForm =
+      repsHistory.length > 0
+        ? repsHistory.reduce((sum, r) => sum + r.form_score, 0) / repsHistory.length
+        : 100;
+
+    if (totalReps === 0) {
+      // Nothing to save — go home.
+      navigate('/');
+      return;
     }
 
-    // Save session
-    addSession({
-      exercise: selectedExercise,
-      reps: totalReps,
-      accuracy: Math.round(avgForm),
-      confidence: 100, // Placeholder confidence
-    });
+    const result = await dispatch(
+      saveSession({
+        exercise: selectedExercise,
+        total_reps: totalReps,
+        avg_form_score: avgForm,
+        duration_seconds: tracker.getDurationSeconds(),
+        rep_history: repsHistory,
+      })
+    );
 
-    // Redirect to Dashboard
-    navigate('/');
+    if (saveSession.fulfilled.match(result)) {
+      navigate('/history');
+    } else {
+      // Stay on the page so the user can retry; saveError is shown in the HUD.
+      console.error('Failed to save session:', result.payload);
+    }
   };
 
   const statusText = (() => {
@@ -139,12 +169,43 @@ export default function WorkoutSession({ user }: WorkoutSessionProps) {
         ) : (
           <button
             onClick={stopSession}
-            className="bg-red-500 hover:bg-red-400 text-white px-6 py-2 rounded-xl font-bold transition-colors"
+            disabled={isSaving}
+            className="bg-red-500 hover:bg-red-400 text-white px-6 py-2 rounded-xl font-bold transition-colors disabled:opacity-60"
           >
-            End Session
+            {isSaving ? 'Saving…' : 'End Session'}
           </button>
         )}
       </div>
+
+      {/* Form score bar (live) */}
+      {sessionActive && (
+        <div className="mb-4">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs uppercase tracking-widest font-bold text-slate-400">
+              Form Score
+            </span>
+            <span className="text-sm font-bold tabular-nums text-white">{formScore}</span>
+          </div>
+          <div className="h-3 w-full bg-slate-800 rounded-full overflow-hidden">
+            <div
+              className={`h-full transition-all duration-300 ${
+                formScore > 80
+                  ? 'bg-emerald-500'
+                  : formScore >= 50
+                  ? 'bg-yellow-500'
+                  : 'bg-red-500'
+              }`}
+              style={{ width: `${Math.max(0, Math.min(100, formScore))}%` }}
+            />
+          </div>
+          {selectedExercise === 'lat_pulldown' && (
+            <LatPulldownDepthIndicator angle={angles?.primary} />
+          )}
+          {saveError && (
+            <p className="mt-2 text-sm text-red-400">{saveError}</p>
+          )}
+        </div>
+      )}
 
       {/* HUD Camera Feed (h-[72vh] w-full) */}
       <div className="relative w-full h-[72vh] bg-black rounded-lg overflow-hidden flex items-center justify-center mb-2">
@@ -175,17 +236,21 @@ export default function WorkoutSession({ user }: WorkoutSessionProps) {
               style={{ transform: 'scaleX(-1)' }}
             />
 
-            {/* Form Score Progress Bar */}
-            <div className="absolute top-0 left-0 w-full h-1.5 bg-gray-800 z-10">
-              <div
-                className="h-full bg-green-400 transition-all duration-300 ease-out"
-                style={{ width: `${Math.max(0, Math.min(100, formScore))}%`, backgroundColor: formScore >= 76 ? '#4ade80' : formScore >= 51 ? '#facc15' : '#f87171' }}
-              />
+            {/* Rep Confirmed Flash */}
+            <div
+              className={`absolute inset-0 pointer-events-none transition-opacity duration-300 z-20 ${
+                repFlash ? 'opacity-100' : 'opacity-0'
+              }`}
+            >
+              <div className="absolute inset-0 ring-4 ring-emerald-400 rounded-lg shadow-[0_0_60px_rgba(16,185,129,0.6)_inset]" />
+              <div className="absolute top-4 right-4 bg-emerald-500/90 text-white px-4 py-2 rounded-xl font-black uppercase tracking-wider text-sm">
+                Rep Confirmed
+              </div>
             </div>
 
             {/* Fading Coach Cue Overlay */}
             <div
-              className={`absolute bottom-8 left-1/2 -translate-x-1/2 transition-opacity duration-300 ${
+              className={`absolute bottom-8 left-1/2 -translate-x-1/2 transition-opacity duration-300 z-20 ${
                 coachCue ? 'opacity-100' : 'opacity-0'
               }`}
             >
@@ -221,6 +286,51 @@ export default function WorkoutSession({ user }: WorkoutSessionProps) {
             {angles?.primary ? Math.round(angles.primary) : '--'}°
           </span>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Lat Pulldown depth indicator. Maps the live elbow angle to a horizontal bar
+ * showing how close the wrist line is to the chest target zone (45–60°
+ * contraction window). Green when in range, yellow when approaching, red
+ * when far from depth.
+ */
+function LatPulldownDepthIndicator({ angle }: { angle?: number }) {
+  if (angle == null) return null;
+  // The bar maps angle 160 (arms up, no pull) → 0% depth, angle 45 (full pull) → 100%.
+  const max = 160;
+  const target = 45;
+  const range = max - target;
+  const depthPct = Math.max(0, Math.min(100, ((max - angle) / range) * 100));
+  const inTarget = angle >= 45 && angle <= 60;
+  const close = angle > 60 && angle <= 90;
+  const color = inTarget ? 'bg-emerald-500' : close ? 'bg-yellow-500' : 'bg-red-500';
+
+  return (
+    <div className="mt-3">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-xs uppercase tracking-widest font-bold text-slate-400">
+          Pull Depth
+        </span>
+        <span className="text-xs font-bold text-slate-300">
+          {inTarget ? 'In Target Zone' : close ? 'Almost There' : 'Pull Lower'}
+        </span>
+      </div>
+      <div className="relative h-3 w-full bg-slate-800 rounded-full overflow-hidden">
+        <div
+          className={`h-full transition-all duration-200 ${color}`}
+          style={{ width: `${depthPct}%` }}
+        />
+        {/* target zone marker: 45-60deg → 100%–~87% on bar */}
+        <div
+          className="absolute top-0 h-full border-l border-r border-emerald-300/70"
+          style={{
+            left: `${((max - 60) / range) * 100}%`,
+            width: `${((60 - 45) / range) * 100}%`,
+          }}
+        />
       </div>
     </div>
   );

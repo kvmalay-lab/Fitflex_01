@@ -57,8 +57,8 @@ export const EXERCISES: Record<string, ExerciseDef> = {
   bicep_curl: {
     id: 'bicep_curl',
     name: 'Bicep Curl',
-    thresholdLow: 70,
-    thresholdHigh: 155,
+    thresholdLow: 35,
+    thresholdHigh: 160,
     startState: 'UP',
     cues: { startCue: 'Extend your arms', endCue: 'Curl up' },
     highlightLandmarks: [11, 13, 15, 12, 14, 16],
@@ -86,7 +86,7 @@ export const EXERCISES: Record<string, ExerciseDef> = {
     id: 'squat',
     name: 'Squat',
     thresholdLow: 90,
-    thresholdHigh: 170,
+    thresholdHigh: 160,
     startState: 'UP',
     cues: { startCue: 'Stand tall', endCue: 'Go deeper' },
     highlightLandmarks: [23, 25, 27, 24, 26, 28],
@@ -160,7 +160,7 @@ export const EXERCISES: Record<string, ExerciseDef> = {
   lat_pulldown: {
     id: 'lat_pulldown',
     name: 'Lat Pulldown',
-    thresholdLow: 45,
+    thresholdLow: 60,
     thresholdHigh: 160,
     startState: 'UP',
     cues: { startCue: 'Reach up', endCue: 'Pull down to chest' },
@@ -171,6 +171,39 @@ export const EXERCISES: Record<string, ExerciseDef> = {
       const left = visible(ls) && visible(le) && visible(lw) ? calculateAngle(ls, le, lw) : null;
       const right = visible(rs) && visible(re) && visible(rw) ? calculateAngle(rs, re, rw) : null;
       return leadAngle(left, right);
+    },
+    detectErrors: (lm, angle) => {
+      const errors: { type: string; message: string; penalty: number }[] = [];
+      const ls = lm[11], rs = lm[12];
+      const lw = lm[15], rw = lm[16];
+
+      // Range-of-motion check ONLY at contraction phase (when arms are most flexed).
+      // We treat angle <= 90 as the contracted/end-of-pull window in which we judge ROM.
+      if (angle <= 90) {
+        // 1. Wrist must reach chest level. Chest line ≈ shoulder Y (slightly below).
+        // In image coords, larger Y = lower on screen. Wrists must be at or below shoulders.
+        if (visible(ls) && visible(rs) && visible(lw) && visible(rw)) {
+          const shoulderY = (ls.y + rs.y) / 2;
+          const wristY = (lw.y + rw.y) / 2;
+          // wristY must be >= shoulderY (i.e., at or below shoulder line on screen)
+          if (wristY < shoulderY - 0.02) {
+            errors.push({
+              type: 'incomplete_rom',
+              message: 'Incomplete Range of Motion',
+              penalty: 5,
+            });
+          }
+        }
+        // 2. Elbow contraction angle must reach 45–60°.
+        if (angle > 60) {
+          errors.push({
+            type: 'incomplete_rom',
+            message: 'Incomplete Range of Motion',
+            penalty: 5,
+          });
+        }
+      }
+      return errors;
     },
   },
 
@@ -212,4 +245,10 @@ export const EXERCISES: Record<string, ExerciseDef> = {
   },
 };
 
-export const EXERCISE_LIST = Object.values(EXERCISES);
+/**
+ * Active exercise list. Deadlift, Shoulder Press, and Plank are temporarily
+ * disabled per Phase 2 scope — only Squat, Bicep Curl, and Lat Pulldown are
+ * supported. Their definitions remain in EXERCISES for future re-enable.
+ */
+export const ACTIVE_EXERCISE_IDS = ['squat', 'bicep_curl', 'lat_pulldown'] as const;
+export const EXERCISE_LIST = ACTIVE_EXERCISE_IDS.map((id) => EXERCISES[id]);

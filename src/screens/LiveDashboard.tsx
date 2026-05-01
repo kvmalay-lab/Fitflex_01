@@ -9,7 +9,7 @@ import ExerciseLabel from '../components/ExerciseLabel';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { resetSession, setExercise, setSessionSummary } from '../store/workoutSlice';
-import { EXERCISE_LIST, EXERCISES } from '../lib/exercises';
+import { EXERCISE_LIST } from '../lib/exercises';
 import { usePoseTracker } from '../hooks/usePoseTracker';
 import { SessionSummary, RepData, TopError } from '../types/workout';
 
@@ -86,7 +86,7 @@ interface HistoryItem {
 export default function LiveDashboard({ user, onLogout }: Props) {
   const navigate = useNavigate();
   const dispatch = useDispatch();
-  const { repCount, formScore, errors, repHistory, sessionStatus, currentExercise, holdDuration, currentRepStage, angles } =
+  const { repCount, formScore, errors, repHistory, sessionStatus, currentExercise, holdDuration, currentRepStage } =
     useSelector((s: RootState) => s.workout);
 
   const [selectedExercise, setSelectedExercise] = useState(currentExercise || 'bicep_curl');
@@ -108,8 +108,7 @@ export default function LiveDashboard({ user, onLogout }: Props) {
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true);
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || '/api';
-      const r = await fetch(`${apiUrl}/sessions/${user.user_id}`, {
+      const r = await fetch(`/api/sessions/${user.user_id}`, {
         headers: { Authorization: `Bearer ${user.token}` },
       });
       const data = await r.json();
@@ -142,8 +141,7 @@ export default function LiveDashboard({ user, onLogout }: Props) {
     const summary = buildSummary(selectedExercise, user.user_id, reps, duration, hold);
 
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || '/api';
-      await fetch(`${apiUrl}/session/save`, {
+      await fetch('/api/session/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${user.token}` },
         body: JSON.stringify(summary),
@@ -173,10 +171,10 @@ export default function LiveDashboard({ user, onLogout }: Props) {
     <div className="min-h-screen bg-slate-950 flex flex-col">
       <NavBar title="FitFlex" userName={user.name} onLogout={onLogout} />
 
-      <div className="flex-1 px-2 py-2 max-w-4xl mx-auto w-full">
+      <div className="flex-1 px-4 py-4 max-w-2xl mx-auto w-full">
         {!sessionActive ? (
-          <div className="flex flex-col gap-3">
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+          <div className="flex flex-col gap-5">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
               <h2 className="text-white font-bold mb-4">Choose Exercise</h2>
               <div className="grid grid-cols-2 gap-2">
                 {EXERCISE_LIST.map((ex) => (
@@ -194,7 +192,7 @@ export default function LiveDashboard({ user, onLogout }: Props) {
               </div>
             </div>
 
-            <div className="flex items-center gap-2 px-1 py-1">
+            <div className="flex items-center gap-2 px-1">
               <div
                 className={`w-2 h-2 rounded-full ${
                   tracker.status === 'ready' || tracker.status === 'running'
@@ -210,8 +208,9 @@ export default function LiveDashboard({ user, onLogout }: Props) {
             <button
               onClick={startSession}
               disabled={tracker.status === 'loading_model' || tracker.status === 'error'}
-              className="w-full py-3 rounded-xl font-bold text-white text-lg bg-emerald-500 hover:bg-emerald-400
-                disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-[0.98]"
+              className="w-full py-4 rounded-2xl font-bold text-white text-lg bg-emerald-500 hover:bg-emerald-400
+                disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-[0.98]
+                shadow-lg shadow-emerald-500/25"
             >
               {tracker.status === 'loading_model' ? 'Loading model…' : 'Start Workout'}
             </button>
@@ -292,20 +291,15 @@ export default function LiveDashboard({ user, onLogout }: Props) {
             </p>
           </div>
         ) : (
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between px-2">
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center justify-between">
               <ExerciseLabel exercise={selectedExercise} status={sessionStatus} />
-              <div className="flex gap-2">
-                <button
-                  onClick={stopSession}
-                  className="px-4 py-1.5 rounded-lg text-white text-xs font-bold bg-red-500/80 hover:bg-red-500 transition-all"
-                >
-                  END
-                </button>
-              </div>
+              <span className="text-slate-500 text-xs">
+                {tracker.personDetected ? 'Tracking' : 'No person detected'}
+              </span>
             </div>
 
-            <div className="relative w-full h-[72vh] bg-black overflow-hidden flex items-center justify-center">
+            <div className="relative bg-black border border-slate-800 rounded-2xl overflow-hidden aspect-video">
               <video
                 ref={videoRef}
                 autoPlay
@@ -313,67 +307,75 @@ export default function LiveDashboard({ user, onLogout }: Props) {
                 muted
                 className="absolute inset-0 w-full h-full object-cover"
                 style={{ transform: 'scaleX(-1)' }}
-                onLoadedMetadata={(e) => {
-                  if (canvasRef.current && videoRef.current) {
-                    canvasRef.current.width = videoRef.current.videoWidth;
-                    canvasRef.current.height = videoRef.current.videoHeight;
-                  }
-                }}
               />
               <canvas
                 ref={canvasRef}
-                className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+                className="absolute inset-0 w-full h-full"
                 style={{ transform: 'scaleX(-1)' }}
               />
-
-              {/* Top Form Score Bar */}
-              <div className="absolute top-0 left-0 w-full h-1.5 bg-gray-800 z-10">
-                <div
-                  className="h-full bg-green-400 transition-all duration-300 ease-out"
-                  style={{ width: `${Math.max(0, Math.min(100, formScore))}%`, backgroundColor: formScore >= 76 ? '#4ade80' : formScore >= 51 ? '#facc15' : '#f87171' }}
-                />
-              </div>
-
-              {/* Fading Coach Cue Overlay */}
-              <div
-                className={`absolute bottom-8 left-1/2 -translate-x-1/2 transition-opacity duration-300 ${
-                  recentErrors.length > 0 || (tracker.status === 'running' && !tracker.personDetected) ? 'opacity-100' : 'opacity-0'
-                }`}
-              >
-                <div
-                  className={`px-6 py-3 rounded-full backdrop-blur-sm ${
-                    recentErrors.length > 0 || (!tracker.personDetected && tracker.status === 'running')
-                      ? 'bg-red-500/80 text-white'
-                      : 'bg-black/60 text-white'
-                  }`}
-                >
-                  <p className="text-lg font-medium">
-                    {!tracker.personDetected && tracker.status === 'running' ? 'Step into the frame' : recentErrors.length > 0 ? recentErrors[0].message : ''}
-                  </p>
-                </div>
+              <div className="absolute top-2 left-2 bg-black/60 px-2 py-1 rounded text-white text-xs">
+                {statusText}
               </div>
             </div>
 
-            {/* Horizontal Metric Strip */}
-            <div className="flex justify-between items-center px-6 py-2 bg-slate-900/50 h-[50px] shrink-0">
-              <div className="flex gap-2 items-baseline">
-                <span className="text-slate-400 text-xs font-bold uppercase tracking-widest">REPS:</span>
-                <span className="text-xl font-black text-white tabular-nums">
-                  {isPlank ? Math.floor(holdDuration) : repCount}
-                </span>
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 flex flex-col items-center">
+              <RepCounter
+                count={repCount}
+                stage={currentRepStage}
+                formScore={formScore}
+                isPlank={isPlank}
+                holdDuration={holdDuration}
+              />
+            </div>
+
+            <div className="flex gap-4">
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex-1 flex flex-col items-center">
+                <FormGauge score={formScore} size="medium" />
               </div>
-              <div className="flex gap-2 items-baseline">
-                <span className="text-slate-400 text-xs font-bold uppercase tracking-widest">CUE:</span>
-                <span className={`text-sm font-bold uppercase ${recentErrors.length > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
-                  {recentErrors.length > 0 ? recentErrors[0].type.replace(/_/g, ' ') : EXERCISES[selectedExercise]?.cues.startCue || 'GOOD FORM'}
-                </span>
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex-1">
+                <p className="text-slate-500 text-xs font-semibold uppercase tracking-wider mb-2">Last Reps</p>
+                {repHistory.length === 0 ? (
+                  <p className="text-slate-600 text-xs">No reps yet</p>
+                ) : (
+                  <div className="flex flex-col gap-1">
+                    {repHistory.slice(-5).reverse().map((r) => (
+                      <div key={r.rep_number} className="flex items-center justify-between">
+                        <span className="text-slate-400 text-xs">Rep {r.rep_number}</span>
+                        <span
+                          className={`text-xs font-bold ${
+                            r.form_score >= 76 ? 'text-emerald-400' : r.form_score >= 51 ? 'text-yellow-400' : 'text-red-400'
+                          }`}
+                        >
+                          {r.form_score}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-              <div className="flex gap-2 items-baseline">
-                <span className="text-slate-400 text-xs font-bold uppercase tracking-widest">ANGLE:</span>
-                <span className="text-xl font-black text-white tabular-nums">
-                  {angles?.primary ? Math.round(angles.primary) : '--'}°
-                </span>
+            </div>
+
+            {recentErrors.length > 0 && (
+              <div className="flex flex-col gap-2">
+                {recentErrors.map((e, i) => (
+                  <ErrorAlert key={e.type} error={e} index={i} />
+                ))}
               </div>
+            )}
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => navigate('/rep-breakdown')}
+                className="flex-1 py-3 rounded-xl text-slate-300 text-sm font-semibold bg-slate-800 hover:bg-slate-700 transition-all"
+              >
+                Breakdown
+              </button>
+              <button
+                onClick={stopSession}
+                className="flex-1 py-3 rounded-xl text-white text-sm font-bold bg-red-500/80 hover:bg-red-500 transition-all"
+              >
+                End Session
+              </button>
             </div>
           </div>
         )}

@@ -28,6 +28,15 @@ replit_domain = os.environ.get("REPLIT_DEV_DOMAIN")
 if replit_domain:
     allowed_origins.append(f"https://{replit_domain}")
 
+# Phase 8: allow operators to configure additional CORS origins (e.g. Vercel
+# preview URLs, custom domains) via the FITFLEX_EXTRA_ORIGINS env var, comma
+# separated. Empty values are ignored.
+extra = os.environ.get("FITFLEX_EXTRA_ORIGINS", "")
+for o in extra.split(","):
+    o = o.strip()
+    if o and o not in allowed_origins:
+        allowed_origins.append(o)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
@@ -73,6 +82,21 @@ class StartSessionRequest(BaseModel):
     exercise_type: str
 
 
+class RepHistoryItem(BaseModel):
+    rep_number: int
+    peak_angle: float
+    form_score: float
+    errors: list = []
+
+
+class SessionCreate(BaseModel):
+    exercise: str
+    total_reps: int
+    avg_form_score: float
+    duration_seconds: int
+    rep_history: list = []
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok", "version": "2.0.0"}
@@ -106,33 +130,51 @@ async def start_session(req: StartSessionRequest, user=Depends(get_current_user)
     return {"session_id": session_id, "status": "started", "exercise": req.exercise_type}
 
 
-@app.post("/api/session/save")
-async def save_completed_session(payload: dict, user=Depends(get_current_user)):
-    """Persist a session computed on the client (browser-only mode)."""
+@app.post("/api/sessions", status_code=201)
+async def create_session(payload: SessionCreate, user=Depends(get_current_user)):
+    """Persist a completed workout session computed on the client.
+
+    Single source of truth for workout history (Phase 4). The session is
+    always scoped to the authenticated user — `user_id` from the JWT is the
+    only one accepted, regardless of any client-supplied value.
+    """
     user_id = user["sub"]
-    payload["user_id"] = user_id
-    if payload.get("total_reps", 0) >= config.SESSION_MIN_REPS_TO_SAVE or payload.get("exercise") == "plank":
-        database.save_session(payload)
-    return {"status": "saved"}
+    saved = database.save_session(
+        user_id=user_id,
+        exercise=payload.exercise,
+        total_reps=payload.total_reps,
+        avg_form_score=payload.avg_form_score,
+        duration_seconds=payload.duration_seconds,
+        rep_history=payload.rep_history,
+    )
+    return {
+        "id": saved.id,
+        "user_id": saved.user_id,
+        "exercise": saved.exercise,
+        "total_reps": saved.total_reps,
+        "avg_form_score": float(saved.avg_form_score),
+        "duration_seconds": saved.duration_seconds,
+        "rep_history": saved.rep_history or [],
+        "created_at": saved.created_at.isoformat() if saved.created_at else None,
+    }
+
+
+@app.get("/api/sessions")
+async def list_sessions(user=Depends(get_current_user), limit: int = 50):
+    """Return the authenticated user's sessions (most recent first)."""
+    user_id = user["sub"]
+    return database.get_user_sessions(user_id, limit=limit)
 
 
 @app.post("/api/session/stop")
 async def stop_session(user=Depends(get_current_user)):
+    """Legacy server-simulated session stop. Persistence happens via the new
+    /api/sessions endpoint instead — the simulator no longer auto-saves."""
     user_id = user["sub"]
     if user_id not in active_sessions:
         return {"status": "no_active_session"}
     manager = active_sessions.pop(user_id)
-    summary = manager.stop_session()
-    if summary.get("total_reps", 0) >= config.SESSION_MIN_REPS_TO_SAVE:
-        database.save_session(summary)
-    return summary
-
-
-@app.get("/api/sessions/{user_id}")
-async def get_sessions(user_id: str, user=Depends(get_current_user)):
-    if user["sub"] != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
-    return database.get_user_sessions(user_id)
+    return manager.stop_session()
 
 
 @app.websocket("/ws/{user_id}")
@@ -169,8 +211,6 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str, token: Optional
                 if cmd.get("action") == "stop" and user_id in active_sessions:
                     mgr = active_sessions.pop(user_id)
                     summary = mgr.stop_session()
-                    if summary.get("total_reps", 0) >= config.SESSION_MIN_REPS_TO_SAVE:
-                        database.save_session(summary)
                     await websocket.send_json(summary)
             except asyncio.TimeoutError:
                 pass

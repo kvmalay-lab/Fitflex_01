@@ -29,8 +29,7 @@ export default function Progress({ user }: Props) {
   const PAGE_SIZE = 10;
 
   useEffect(() => {
-    const apiUrl = import.meta.env.VITE_API_URL || '/api';
-    fetch(`${apiUrl}/sessions/${user.user_id}`, { headers: { Authorization: `Bearer ${user.token}` } })
+    fetch(`/api/sessions/${user.user_id}`, { headers: { Authorization: `Bearer ${user.token}` } })
       .then(r => r.json())
       .then(data => { setSessions(Array.isArray(data) ? data : []); setLoading(false); })
       .catch(() => setLoading(false));
