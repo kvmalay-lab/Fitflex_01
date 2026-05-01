@@ -51,6 +51,9 @@ export function useWorkoutHistory() {
     refresh();
   }, [refresh]);
 
+  // Expose a way to manually trigger a refresh, or auto-refresh when
+  // navigating.
+
   const getLast7Days = useCallback(() => {
     const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
     return history.filter((s) => new Date(s.date).getTime() >= cutoff);
