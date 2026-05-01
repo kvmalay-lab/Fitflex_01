@@ -1,11 +1,17 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { useWorkoutHistory } from '../hooks/useWorkoutHistory';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { Activity, Dumbbell, Award, Flame } from 'lucide-react';
 import { EXERCISES } from '../lib/exercises';
 
 export default function Dashboard() {
-  const { history, getLast7Days } = useWorkoutHistory();
+  const { history, getLast7Days, refresh } = useWorkoutHistory();
+
+  // Re-fetch on mount when navigating here
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
   const recentHistory = getLast7Days();
 
   // Calculate statistics

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useWorkoutHistory } from '../hooks/useWorkoutHistory';
 import { EXERCISES } from '../lib/exercises';
 
@@ -10,6 +10,10 @@ function formatDuration(s: number): string {
 
 export default function History() {
   const { history, loading, error, refresh } = useWorkoutHistory();
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
