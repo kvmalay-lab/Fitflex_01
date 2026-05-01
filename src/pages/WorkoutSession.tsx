@@ -108,12 +108,25 @@ export default function WorkoutSession({ user }: WorkoutSessionProps) {
     // Always navigate to /history after ending — whether or not a save occurs —
     // so the user can see their previous sessions.
     if (totalReps === 0 && duration < 5) {
-      // Session too short / no reps detected, nothing worth saving.
-      navigate('/history');
+      navigate('/history', {
+        state: {
+          summary: null,
+          skipped: true,
+        },
+      });
       return;
     }
 
-    await dispatch(
+    const summary = {
+      exercise: selectedExercise,
+      exerciseName: EXERCISES[selectedExercise]?.name ?? selectedExercise,
+      total_reps: totalReps,
+      avg_form_score: Math.round(avgForm),
+      duration_seconds: duration,
+      saved: false,
+    };
+
+    const result = await dispatch(
       saveSession({
         exercise: selectedExercise,
         total_reps: totalReps,
@@ -122,10 +135,9 @@ export default function WorkoutSession({ user }: WorkoutSessionProps) {
         rep_history: repsHistory,
       })
     );
+    summary.saved = saveSession.fulfilled.match(result);
 
-    // Navigate to history regardless of save success/failure so the user can
-    // see all their prior sessions. saveError is shown in the HUD if it failed.
-    navigate('/history');
+    navigate('/history', { state: { summary } });
   };
 
   const statusText = (() => {
