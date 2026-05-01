@@ -74,7 +74,11 @@ export const saveSession = createAsyncThunk<SessionRecord, SaveSessionInput>(
       });
       return record;
     } catch (e: any) {
-      return rejectWithValue(e?.message ?? 'Failed to save session');
+      // Log full axios error in the browser console for debugging.
+      const status = e?.response?.status;
+      const detail = e?.response?.data?.detail ?? e?.message ?? 'Unknown';
+      console.error(`[saveSession] POST /api/sessions failed — HTTP ${status ?? 'N/A'}: ${detail}`, e);
+      return rejectWithValue(`HTTP ${status ?? 'N/A'}: ${detail}`);
     }
   }
 );

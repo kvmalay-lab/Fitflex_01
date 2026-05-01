@@ -18,12 +18,15 @@ api.interceptors.request.use((config) => {
     const stored = localStorage.getItem('fitflex_user');
     if (stored) {
       const { token } = JSON.parse(stored) as { token?: string };
-      if (token && config.headers) {
-        config.headers.set('Authorization', `Bearer ${token}`);
+      if (token) {
+        // AxiosHeaders (axios 1.x) is always present on a created config;
+        // cast through unknown to avoid TS strictness on the exact subtype.
+        (config.headers as unknown as Record<string, string>)['Authorization'] =
+          `Bearer ${token}`;
       }
     }
-  } catch {
-    /* ignore */
+  } catch (e) {
+    console.error('[api] Failed to attach auth header', e);
   }
   return config;
 });

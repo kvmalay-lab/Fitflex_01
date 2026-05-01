@@ -10,6 +10,7 @@ interface SessionSummaryState {
   avg_form_score: number;
   duration_seconds: number;
   saved: boolean;
+  errorMsg?: string;
 }
 
 interface LocationState {
@@ -93,6 +94,8 @@ function PostSessionModal({
           <p className={`text-sm font-semibold ${summary.saved ? 'text-emerald-400' : 'text-yellow-400'}`}>
             {summary.saved
               ? `Saved — ${formScoreLabel(summary.avg_form_score)}`
+              : summary.errorMsg
+              ? `Save failed: ${summary.errorMsg}`
               : 'Could not save session — check your connection'}
           </p>
         </div>

@@ -117,7 +117,15 @@ export default function WorkoutSession({ user }: WorkoutSessionProps) {
       return;
     }
 
-    const summary = {
+    const summary: {
+      exercise: string;
+      exerciseName: string;
+      total_reps: number;
+      avg_form_score: number;
+      duration_seconds: number;
+      saved: boolean;
+      errorMsg?: string;
+    } = {
       exercise: selectedExercise,
       exerciseName: EXERCISES[selectedExercise]?.name ?? selectedExercise,
       total_reps: totalReps,
@@ -136,6 +144,12 @@ export default function WorkoutSession({ user }: WorkoutSessionProps) {
       })
     );
     summary.saved = saveSession.fulfilled.match(result);
+
+    if (!summary.saved) {
+      const payload = (result as { payload?: unknown }).payload;
+      summary.errorMsg = typeof payload === 'string' ? payload : 'Unknown error';
+      console.error('[stopSession] Save failed:', summary.errorMsg);
+    }
 
     navigate('/history', { state: { summary } });
   };
